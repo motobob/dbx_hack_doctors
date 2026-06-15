@@ -4,6 +4,12 @@ import "./styles.css";
 
 const tabs = ["Current State", "Import + Pipeline", "Actions", "Risk Recommendations"];
 
+function formatBadgeValue(value) {
+  const number = Number(value || 0);
+  if (number > 99) return "99+";
+  return number.toLocaleString();
+}
+
 async function api(path, options = {}, timeoutMs = 25000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -152,6 +158,30 @@ function DataTable({ rows, columns, onRowClick, selectedId, sort, onSort }) {
   );
 }
 
+function readinessFlagTone(flag) {
+  const normalized = String(flag || "").toLowerCase();
+  if (normalized.includes("missing") || normalized.includes("sparse")) return "risk";
+  if (normalized.includes("cluster")) return "muted";
+  return "info";
+}
+
+function ReadinessFlags({ value }) {
+  const flags = String(value || "ok")
+    .split(",")
+    .map((flag) => flag.trim())
+    .filter(Boolean);
+
+  return (
+    <div className="readiness-flags">
+      {flags.map((flag) => (
+        <span className={`readiness-flag readiness-${readinessFlagTone(flag)}`} key={flag}>
+          {flag}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 function CurrentState({ state, onActionJump }) {
   const profile = state.run.profile;
   const components = profile.score_components || {};
@@ -161,7 +191,7 @@ function CurrentState({ state, onActionJump }) {
     { key: "address_stateOrRegion", label: "State" },
     { key: "address_zipOrPostcode", label: "PIN" },
     { key: "organization_type", label: "Type" },
-    { key: "readiness_flags", label: "Readiness flags" }
+    { key: "readiness_flags", label: "Readiness flags", render: (row) => <ReadinessFlags value={row.readiness_flags} /> }
   ];
   const [previewSearch, setPreviewSearch] = useState("");
   const [previewSort, setPreviewSort] = useState({ key: "name", direction: "asc" });
@@ -272,7 +302,9 @@ function CurrentState({ state, onActionJump }) {
         <div className="panel-head">
           <div>
             <h2>Dataset Preview</h2>
-            <p>Rows are sampled from the downloaded Databricks Marketplace facilities table.</p>
+            <p>
+              Showing {previewRows.length.toLocaleString()} preview rows from {profile.row_count.toLocaleString()} loaded facility records.
+            </p>
           </div>
           <div className="preview-controls">
             <input
@@ -557,6 +589,36 @@ function actionButtonsFor(action) {
     { label: action?.secondary_action || "Reject", status: "Rejected", noteRequired: true },
     { label: "Needs review", status: "Needs review", noteRequired: false }
   ];
+}
+
+function tabBadgeCounts(state, pipeline) {
+  const profile = state.run.profile || {};
+  const actions = state.run.actions || [];
+  const risks = state.run.risks || [];
+  const openActions = actions.filter((action) => !["Approved", "Applied", "Rejected"].includes(action.status)).length;
+  const driverCount = [
+    profile.expected_lift,
+    profile.duplicate_clusters,
+    profile.sparse_locations,
+    profile.suspicious_claims,
+    profile.human_review_queue
+  ].filter((value) => Number(value || 0) > 0).length;
+  const agents = pipeline?.agents || {};
+  const runningAgents = Object.values(agents).filter((agent) => ["running", "pending"].includes(agent?.status)).length;
+  const reviewItems = agents.review?.result?.summary?.review_count || 0;
+  const importPipelineCount =
+    pipeline?.status === "running"
+      ? runningAgents || 1
+      : pipeline?.status === "completed"
+        ? reviewItems
+        : 1;
+
+  return {
+    "Current State": driverCount,
+    "Import + Pipeline": importPipelineCount,
+    Actions: openActions,
+    "Risk Recommendations": risks.length
+  };
 }
 
 function ActionsQueue({ state, onDecision, focus }) {
@@ -974,6 +1036,7 @@ function App() {
   const backendStatus = state.run.backend_status || (state.run.fallback ? "warming" : "live");
   const backendStatusLabel =
     backendStatus === "live" ? "Live data" : backendStatus === "refreshing" ? "Refreshing cache" : "Warming cache";
+  const badges = tabBadgeCounts(state, pipeline);
 
   return (
     <main className="app-shell">
@@ -993,7 +1056,10 @@ function App() {
       <nav className="tabs">
         {tabs.map((tab) => (
           <button key={tab} className={activeTab === tab ? "active" : ""} onClick={() => setActiveTab(tab)}>
-            {tab}
+            <span>{tab}</span>
+            <span className={`tab-badge ${badges[tab] ? "" : "tab-badge-empty"}`} title={`${badges[tab].toLocaleString()} items`}>
+              {formatBadgeValue(badges[tab])}
+            </span>
           </button>
         ))}
       </nav>

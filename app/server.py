@@ -112,6 +112,15 @@ def _state_cache_enabled() -> bool:
     return True
 
 
+def _state_cache_prewarm_enabled() -> bool:
+    setting = os.getenv("APP_STATE_CACHE_PREWARM", "").strip().lower()
+    if setting in {"1", "true", "yes", "on"}:
+        return True
+    if setting in {"0", "false", "no", "off"}:
+        return False
+    return _state_cache_enabled()
+
+
 def _get_cached_state() -> dict[str, Any] | None:
     with STATE_CACHE_LOCK:
         state = STATE_CACHE.get("state")
@@ -147,6 +156,12 @@ def _start_background_refresh() -> None:
             _mark_refreshing(False)
 
     threading.Thread(target=refresh, name="state-cache-refresh", daemon=True).start()
+
+
+@app.on_event("startup")
+def prewarm_state_cache() -> None:
+    if _state_cache_prewarm_enabled():
+        _start_background_refresh()
 
 
 def _source_label() -> tuple[str, str, str]:
@@ -276,6 +291,13 @@ async def diagnostics() -> dict[str, Any]:
 @app.get("/api/state")
 async def state() -> dict[str, Any]:
     timeout = float(os.getenv("APP_STATE_LOAD_TIMEOUT_SECONDS", "20"))
+    cached = _get_cached_state()
+    if cached and not cached.get("run", {}).get("fallback"):
+        cached["served_from_cache"] = True
+        if cached.get("run", {}).get("backend_status") == "live":
+            _start_background_refresh()
+        return cached
+
     try:
         next_state = await asyncio.wait_for(asyncio.to_thread(_load_app_state), timeout=timeout)
         if _state_cache_enabled():

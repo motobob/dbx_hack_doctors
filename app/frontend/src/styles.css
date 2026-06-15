@@ -134,6 +134,9 @@ button.primary:hover {
 }
 
 .tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -145,6 +148,30 @@ button.primary:hover {
   border-bottom-color: var(--lava-600);
   color: var(--lava-600);
   font-weight: 700;
+}
+
+.tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--lava-600);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0 6px;
+}
+
+.tab-badge-empty {
+  background: var(--gray-lines);
+  color: var(--gray-navigation);
+}
+
+.tabs button.active .tab-badge {
+  box-shadow: 0 0 0 2px rgba(255, 54, 33, 0.14);
 }
 
 .page-grid {
@@ -340,6 +367,43 @@ button.primary:hover {
   color: var(--gray-navigation);
   background: var(--oat-light);
   font-size: 0.92em;
+}
+
+.readiness-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.readiness-flag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  border: 1px solid var(--gray-lines);
+  border-radius: 999px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.readiness-risk {
+  border-color: var(--maroon-600);
+  color: var(--maroon-600);
+  background: #fff1f3;
+}
+
+.readiness-muted {
+  border-color: var(--gray-lines);
+  color: var(--gray-navigation);
+  background: var(--oat-medium);
+}
+
+.readiness-info {
+  border-color: var(--blue-600);
+  color: var(--gray-navigation);
+  background: #eef7ff;
 }
 
 .detail-panel textarea {

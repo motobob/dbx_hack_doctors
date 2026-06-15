@@ -44,7 +44,16 @@ def fallback_on_state_error() -> bool:
         return True
     if setting in {"0", "false", "no", "off"}:
         return False
-    return use_unity_catalog()
+    return not use_unity_catalog()
+
+
+def use_sql_cloud_fetch() -> bool:
+    setting = os.getenv("DATABRICKS_SQL_USE_CLOUD_FETCH", "").strip().lower()
+    if setting in {"1", "true", "yes", "on"}:
+        return True
+    if setting in {"0", "false", "no", "off"}:
+        return False
+    return False
 
 
 def app_config_summary() -> dict[str, Any]:
@@ -59,6 +68,7 @@ def app_config_summary() -> dict[str, Any]:
         "warehouse_configured": bool(os.getenv("DATABRICKS_WAREHOUSE_ID") or os.getenv("APP_SQL_WAREHOUSE_ID")),
         "host_configured": bool(os.getenv("DATABRICKS_HOST") or os.getenv("DATABRICKS_WORKSPACE_URL")),
         "token_configured": bool(os.getenv("DATABRICKS_TOKEN")),
+        "sql_cloud_fetch": use_sql_cloud_fetch(),
         "source_row_limit": os.getenv("APP_SOURCE_ROW_LIMIT", ""),
         "state_load_timeout_seconds": os.getenv("APP_STATE_LOAD_TIMEOUT_SECONDS", "20"),
         "fallback_on_state_error": fallback_on_state_error(),
@@ -143,6 +153,7 @@ def sql_connection():
         server_hostname=_server_hostname(),
         http_path=f"/sql/1.0/warehouses/{warehouse_id}",
         access_token=_access_token(),
+        use_cloud_fetch=use_sql_cloud_fetch(),
     )
     try:
         yield connection

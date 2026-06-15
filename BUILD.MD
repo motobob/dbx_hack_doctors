@@ -125,7 +125,7 @@ Latest local validation with `AGENT_LLM_ENABLED=false`:
 
 ## UX and UI Mockups
 
-The app should feel like a Databricks-native operational dashboard: dense, calm, evidence-first, and optimized for repeated review work. The MVP should use **three primary tabs** instead of a deep navigation tree:
+The app should feel like a Databricks-native operational dashboard: dense, calm, evidence-first, and optimized for repeated review work. The MVP uses **four top-level tabs** instead of a deep navigation tree:
 
 - `Current State`
 - `Import + Pipeline`
@@ -142,6 +142,10 @@ Databricks Apps assumptions:
 - Use Databricks workspace auth instead of a separate login screen.
 - Add an optional app-level Basic Auth gate for demo-link sharing.
 - Read and write through Unity Catalog tables.
+- Default to Unity Catalog source and resulting state in Databricks Apps.
+- Keep a local/offline mode for demos and development, but do not silently present the 3-row demo fallback as live DBX data.
+- Disable Databricks SQL cloud fetch in the app runtime because the Databricks App container can fail to retrieve result chunks from cloud storage URLs.
+- Prewarm `/api/state` on app startup so the 10,000-row source state is loaded before the user clicks around.
 - Keep long-running profiling, dedupe, and AI extraction jobs behind buttons with visible run status.
 - Use Databricks SQL or Spark-backed tables for persisted outputs, not only local JSON state.
 - Make the UI usable in a browser tab embedded in the Databricks workspace.
@@ -172,7 +176,7 @@ Global design rules:
 
 - Use compact cards only for metrics and repeated row summaries.
 - Use full-width tables for review workflows.
-- Use status colors sparingly: red for critical, amber for review, green for trusted, gray for unknown.
+- Use status colors sparingly: lava/red for critical or primary action, amber for review, green for trusted/completed, gray for duplicate/unknown, and blue-gray for neutral information.
 - Never hide uncertainty; show confidence beside every recommendation.
 - Keep every recommendation tied to source evidence.
 
@@ -222,6 +226,11 @@ Implementation notes:
 - Use React components for headline KPI cards.
 - Use CSS progress bars for score components.
 - Use a table component for the current dataset preview.
+- Dataset preview is a sample view, not the full dataset table. The UI labels it as "showing N preview rows from 10,000 loaded facility records."
+- Readiness flags render as chips:
+  - red for missing or sparse fields
+  - gray for duplicate/cluster signals
+  - blue-gray for neutral/ok signals
 - Read state from `GET /api/state`.
 - Persist KPI snapshots to `readiness_kpi_snapshot`.
 
@@ -359,10 +368,11 @@ Layout:
 
 Palette:
 
-- Background: white or near-white.
-- Text: dark neutral.
-- Accent: Databricks-style red/orange only for primary actions and selected states.
-- Status colors: green, amber, red, gray.
+- Background: Oat Light `#F9F7F4` and white panels.
+- Text: Navy 900 `#0B2026`; secondary text Gray Text `#5A6F77`.
+- Primary action/selected state: Lava 600 `#FF3621`; hover Lava 500 `#FF5F46`.
+- Navigation and quiet structure: Navy 800 `#1B3139`, Gray Navigation `#303F47`, Gray Lines `#DCE0E2`.
+- Status colors: Green 600 `#00A972`, Yellow 600 `#FFAB00`, Maroon 600 `#98102A`, Blue 600 `#2272B4`.
 - Avoid a one-color blue or purple analytics theme.
 
 Typography:
@@ -379,6 +389,7 @@ Component rules:
 - Detail panels for evidence and source rows.
 - Progress bars for score components.
 - Dataframes/editors for work queues.
+- Chips for readiness flags, queue state, backend state, scratchpad tags, and status labels.
 
 Empty states:
 
@@ -397,6 +408,8 @@ Loading states:
 Error states:
 
 - Missing warehouse or permissions: explain which table or operation failed.
+- DBX source/state load failure: fail loudly with diagnostics. Do not show the tiny demo dataset as if it is the live 10,000-row source.
+- Databricks SQL result fetch failure from cloud storage URLs: set `DATABRICKS_SQL_USE_CLOUD_FETCH=false`.
 - Upload parse error: show filename, row number if available, and expected format.
 - Save failure: keep user decisions in session and provide retry.
 - Empty source table: ask user to choose another table or upload a file.
@@ -960,7 +973,7 @@ Current deploy status:
 - Local eight-agent skeleton was revalidated on 2026-06-15: Python compile passed, frontend build passed, and a local pipeline run completed `ingestion`, `qa`, `dedup`, `evidence`, `geo`, `shortage`, `review`, and `risk`.
 - Local API-style end-to-end smoke test is implemented at `scripts/smoke_local_e2e.py` and passes against the demo XLSX import path.
 - Databricks Job mode is scaffolded with `scripts/setup_dbx_job.py`.
-- Databricks Job mode is **not verified deployed** until `DATABRICKS_PIPELINE_JOB_ID` is created, app env is updated to `PIPELINE_MODE=databricks`, and an end-to-end run completes.
+- Databricks multi-task Job exists as `590750946177761`, but Job mode is **not verified deployed** until an end-to-end run completes.
 - Deployed skeleton currently uses `PIPELINE_MODE=local` and `AGENT_LLM_ENABLED=false` for predictable click-through behavior.
 
 Local smoke command:
@@ -1016,7 +1029,7 @@ Default model: `databricks-meta-llama-3-3-70b-instruct` (override with `DATABRIC
 ## Suggested Databricks Stack
 
 - Databricks App served by FastAPI.
-- Vite/React frontend for the rich three-tab workflow.
+- Vite/React frontend for the rich four-tab workflow.
 - FastAPI API routes for scratchpad saves, upload previews, re-parse triggers, action decisions, pipeline control, and risk outputs.
 - Unity Catalog tables for Bronze/Silver/Gold data.
 - Databricks SQL for aggregations and KPI queries.
@@ -1031,7 +1044,8 @@ The current app is a clickable Databricks App skeleton with a local/offline mode
 - FastAPI backend in `app/server.py`.
 - React/Vite frontend in `app/frontend/`.
 - Databricks App command in `app/app.yaml`.
-- Hot in-memory `/api/state` cache with background refresh and warm demo fallback.
+- Hot in-memory `/api/state` cache with startup prewarm and background refresh.
+- Strict DBX behavior: Unity Catalog load failures should be visible diagnostics, not a silent 3-row demo fallback.
 - Local scratchpad state in `app/state/scratchpad.md`.
 - Local/generated re-parse state in `app/state/last_run.json`.
 - Source/state loader in `app/lib/store.py` for checked-in CSV, Unity Catalog, and demo fallback modes.
@@ -1053,6 +1067,7 @@ Current workflow:
 8. React UI refreshes the four tabs from `GET /api/state`.
 9. The Actions tab presents queue lanes for human review, agent-ready fixes, evidence review, steward triage, and closed decisions.
 10. Selected action decisions are written through `POST /api/actions/{action_id}/decision`; in Unity Catalog state mode they update `result.action_recommendations` and append `result.action_decisions` plus audit events.
+11. Dataset preview shows a bounded sample with color-coded readiness chips and a label indicating total loaded records.
 
 Current data backend modes:
 
@@ -1097,16 +1112,31 @@ APP_SOURCE_CATALOG=databricks_virtue_foundation_dataset_dais_2026
 APP_SOURCE_SCHEMA=virtue_foundation_dataset
 APP_SOURCE_TABLE=facilities
 APP_RESULT_CATALOG=dais_readiness_desk
+APP_SOURCE_ROW_LIMIT=10000
+APP_STATE_LOAD_TIMEOUT_SECONDS=45
+APP_STATE_CACHE_PREWARM=true
+APP_STATE_FALLBACK_ON_ERROR=false
+DATABRICKS_SQL_USE_CLOUD_FETCH=false
 ```
 
 Runtime behavior:
 
-- `/api/state` is cache-first from a user-experience perspective.
-- If DBX/UC state loading is slow or unavailable, the app serves in-memory cached state or a warm demo state and refreshes in the background.
-- The main UI should not show full-width backend failure messages during normal use.
+- `/api/state` prewarms on FastAPI startup.
+- Once live state is cached, `/api/state` is cache-first and refreshes in the background.
+- In DBX mode, source/state load failures fail loudly with diagnostics. The app must not show the 3-row demo fallback as live data.
+- The tiny demo fallback is reserved for local/offline click-through or explicitly enabled fallback mode.
+- Databricks SQL connector runs with `use_cloud_fetch=false`; Databricks Apps may not be able to fetch result chunks from external cloud storage URLs.
 - `/api/status` exposes cheap cache status.
 - `/api/diagnostics` is reserved for explicit catalog/table debugging.
 - Databricks App sharing should be set to `Anyone in my organization can use` for the demo workspace unless stricter sharing is required.
+
+Latest DBX data-load validation on 2026-06-15:
+
+- Source: `databricks_virtue_foundation_dataset_dais_2026.virtue_foundation_dataset.facilities`.
+- Warehouse: `e428febecc2419c5`.
+- With `DATABRICKS_SQL_USE_CLOUD_FETCH=false`, the app state builder loaded 10,000 rows and 51 columns.
+- Full app state validation produced `backend=live`, `fallback=False`, and 100 preview rows.
+- The cloud-fetch failure mode was observed in Databricks App logs as blocked requests to `us-west-2.storage.cloud.databricks.com`.
 
 Current API routes:
 

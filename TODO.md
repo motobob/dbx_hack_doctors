@@ -29,10 +29,10 @@ Top-level product setting:
 
 Core files:
 - `app/server.py`: FastAPI API + static React server. Includes pipeline endpoints.
-- `app/frontend/src/main.jsx`: React app — three tabs, pipeline status panel with agent cards, ingest mode.
-- `app/frontend/src/styles.css`: dashboard styling including agent card and badge system.
+- `app/frontend/src/main.jsx`: React app — four tabs, pipeline status panel with agent cards, ingest mode, actionable queue, risk handoff, and readiness-flag chips.
+- `app/frontend/src/styles.css`: dashboard styling using the agreed Lava/Navy/Oat/Gray/Green/Blue palette, agent cards, queue chips, and preview readiness chips.
 - `app/app.yaml`: Databricks App command and deployment env vars.
-- `app/lib/databricks.py`: Databricks SQL / Unity Catalog helper, auth, config summary.
+- `app/lib/databricks.py`: Databricks SQL / Unity Catalog helper, auth, config summary, and SQL cloud-fetch control.
 - `app/lib/store.py`: source/state loader — local checked-in, Unity Catalog, and demo modes.
 - `app/lib/reparser.py`: mock profiler, action generator, and risk generator.
 - `app/lib/llm.py`: Databricks Foundation Models via OpenAI SDK (`/serving-endpoints`).
@@ -82,6 +82,8 @@ Completed/working now:
 - [x] Dataset preview table.
 - [x] Dataset preview search UI.
 - [x] Dataset preview order-by column and asc/desc UI.
+- [x] Dataset preview labels sample rows against total loaded rows.
+- [x] Dataset preview readiness flags render as colored chips: red missing/sparse, gray clustered, blue-gray ok/neutral.
 - [x] Recommendations/actions table with selected action detail.
 - [x] Upload preview API for CSV/XLS/XLSX.
 - [x] Mock re-parse flow regenerates profile/actions/risks.
@@ -91,8 +93,12 @@ Completed/working now:
 - [x] Unity Catalog source/target env placeholders in `app/app.yaml`.
 - [x] Deploy diagnostics: `/api/config`, `/api/status`, bounded `/api/state`, and `/api/diagnostics`.
 - [x] In-memory hot state cache so DBX mode keeps the dashboard clickable.
+- [x] Startup state-cache prewarm in DBX mode.
+- [x] Cache-first `/api/state` after live state is hydrated.
 - [x] Compact backend status pill (live / refreshing / warming).
 - [x] Ephemeral unsaved result state on first load when UC result tables are empty.
+- [x] DBX strict source/state behavior: fallback disabled in deployed app so 3-row demo data cannot masquerade as the 10K source.
+- [x] Databricks SQL cloud fetch disabled with `DATABRICKS_SQL_USE_CLOUD_FETCH=false` to avoid blocked app-runtime result chunk downloads.
 - [x] `run.sh` — ui / api / dev / deploy [name] / open [name].
 - [x] `setup.sh` — teammate onboarding (venv, DBX CLI, profile, .env).
 - [x] Databricks Apps deploy pipeline (sync + ensure_app state machine).
@@ -114,6 +120,7 @@ Completed/working now:
 - [x] KPI cards on `Current State` are clickable and navigate into filtered `Actions`.
 - [x] Four-tab UI deployed to Databricks Apps on 2026-06-15.
 - [x] Databricks multi-task Job created: `590750946177761`.
+- [x] Deployed app data-load fix validated locally against configured DBX host/warehouse/source: 10,000 rows, 51 columns, `backend=live`, `fallback=False`.
 - [ ] Databricks Job validation: latest run failed at `ingestion`; downstream tasks were skipped.
 - [ ] Databricks Job mode deployed and verified end-to-end.
 
@@ -138,17 +145,19 @@ flowchart LR
   - [ ] read `APP_SOURCE_CATALOG.APP_SOURCE_SCHEMA.APP_SOURCE_TABLE`
   - [ ] use the configured SQL warehouse
   - [ ] write `APP_RESULT_CATALOG.work/result/audit`
-- [ ] **P0 deploy smoke:** open deployed `/api/status`, `/api/config`, `/api/state`, and `/api/diagnostics`.
+- [ ] **P0 deploy smoke:** hard refresh deployed UI and verify it shows the real source catalog, `Live data`, 10,000 loaded facility records, and no `Warming cache`.
+- [ ] **P0 deploy API smoke:** open deployed `/api/status`, `/api/config`, `/api/state`, and `/api/diagnostics` from an authenticated browser session.
 - [ ] **P0 three-minute demo story:** verify the live app can show current numbers, import/stage, run agents, show proof/reject queue, and show risk recommendations without narration gaps.
 - [x] **P0 tab split:** separate `Import + Pipeline` from `Actions` and keep `Actions` as a dedicated proof/reject work queue.
 - [x] **P0 actionable queue:** add clickable queue lanes, selected-action next steps, status-aware decision buttons, and risk-to-actions handoff.
+- [x] **P0 DBX data-load fix:** disable SQL cloud fetch, prewarm state cache, increase timeout, and disable silent DBX fallback.
 - [ ] **P1 pipeline persistence:** persist agent outputs from `app/lib/agents/` into Unity Catalog work/result tables.
 - [x] **P1 target agents:** add skeleton Ingestion Manager, QA/Profile Agent, Evidence/Specialty Agent, and Human Review Gate.
 - [x] **P1 proof/reject UX:** turn HumanReviewGate output into explicit Accept / Reject / Needs evidence controls.
 - [x] **P1 action comments:** add required/free-text comment capture for accepted/rejected actions.
 - [ ] **P1 risk UI:** wire RiskAgent output into the `Risk Recommendations` tab instead of mock rows.
 - [ ] **P1 import staging:** add `POST /api/import/stage` and stage uploaded rows into source/work tables.
-- [ ] **P2 UX polish:** split React components, add table pagination, add toasts, and add confidence/status chips.
+- [ ] **P2 UX polish:** split React components, add table pagination, add toasts, and add remaining confidence/status chips.
 
 ## Phase 1: Make the Skeleton Feel Great
 
@@ -166,6 +175,7 @@ flowchart LR
 - [ ] Add toast/banner feedback for save success and API errors.
 - [x] Add a richer selected-action side panel.
 - [x] Add queue/status chips instead of raw queue text.
+- [x] Add dataset preview readiness chips.
 - [x] Add a Markdown preview toggle for the scratchpad.
 - [x] Add "jump to Actions" behavior from Current State drivers.
 - [x] Add "jump to Actions" behavior from Risk Recommendation detail.
@@ -241,7 +251,14 @@ flowchart LR
 - [x] Add source/state mode env config:
   - [x] `APP_SOURCE_MODE`
   - [x] `APP_STATE_MODE`
-- [ ] Confirm source reads work in deployed Databricks App.
+- [x] Add DBX runtime env:
+  - [x] `APP_SOURCE_ROW_LIMIT=10000`
+  - [x] `APP_STATE_LOAD_TIMEOUT_SECONDS=45`
+  - [x] `APP_STATE_CACHE_PREWARM=true`
+  - [x] `APP_STATE_FALLBACK_ON_ERROR=false`
+  - [x] `DATABRICKS_SQL_USE_CLOUD_FETCH=false`
+- [x] Confirm source reads work with deployed DBX config from local validation: 10,000 source rows and 51 columns.
+- [ ] Confirm source reads from deployed UI after authenticated hard refresh.
 - [ ] Confirm target writes work in deployed Databricks App.
 - [ ] Set Databricks App sharing to `Anyone in my organization can use` for the demo workspace.
 - [ ] If narrower sharing is needed, grant demo users or a demo group `CAN USE` on the Databricks App.
@@ -255,6 +272,8 @@ flowchart LR
   - [ ] result catalog is correct
   - [ ] SQL warehouse is configured
   - [ ] host is configured
+  - [ ] `sql_cloud_fetch=false`
+  - [ ] `fallback_on_state_error=false`
 - [ ] Keep Marketplace/source catalog read-only.
 - [x] Treat source state and resulting state separately in app configuration:
   - [x] source state can come from checked-in data or Databricks catalog
@@ -292,12 +311,13 @@ flowchart LR
   - [ ] `run_id`
   - [ ] `state_version_id`
 - [x] Add Databricks SQL connector helper in `app/lib/databricks.py`.
+- [x] Disable Databricks SQL cloud fetch by default for Databricks Apps.
 - [x] Add code path to read/write result state from Unity Catalog when `APP_STATE_MODE=unity_catalog`.
 - [ ] Validate Unity Catalog write path against real workspace permissions.
 - [ ] Replace local `last_run.json` entirely in deployed mode.
 - [ ] Persist scratchpad revisions and notes in Unity Catalog.
 - [ ] Persist action decisions with actor and timestamp.
-- [ ] Persist hot-cache fallback events or backend warmup status to audit/telemetry.
+- [ ] Persist hot-cache prewarm/refresh events and backend status to audit/telemetry.
 
 ## Phase 6: Databricks Agent Backend / Worker Flow ✅ (core done)
 

@@ -145,3 +145,87 @@ Because of time, the MVP should focus on:
 - Region-level planning view.
 
 Anything beyond that should be treated as stretch.
+
+## Current Product Shape
+
+As of the latest 2026-06-15 build, the app is a Databricks App with a FastAPI backend and React/Vite frontend. The working product surface is four tabs:
+
+- **Current State**: mission-control landing view with data consistency, facility count, duplicate clusters, human review count, score components, scratchpad-derived tags, and a searchable/sortable dataset preview.
+- **Import + Pipeline**: XLS/XLSX/CSV upload preview, Markdown scratchpad View/Edit flow, re-parse trigger, and the eight-agent pipeline status panel.
+- **Actions**: actionable proof/reject work queue with clickable lanes, selected-action next steps, decision notes, and status-aware controls such as approve merge, apply safe fix, reject claim, and needs more evidence.
+- **Risk Recommendations**: Track 2 planning output with evidence-attached risk rows, planning notes, and handoff buttons back into cleanup actions/evidence review.
+
+```mermaid
+flowchart LR
+  current[Current State] --> import[Import + Pipeline]
+  import --> agents[8-agent workflow]
+  agents --> actions[Action queue]
+  actions --> result[Trusted resulting state]
+  result --> risk[Risk Recommendations]
+  risk --> actions
+```
+
+Key UX decisions:
+
+- KPI cards are not passive; they navigate into filtered actions.
+- Import and pipeline execution are separate from the Actions tab.
+- Actions are a queue, not just a recommendation table.
+- Risk recommendations must link back to cleanup work because planning risk is only credible when the underlying data issues are resolved.
+- Dataset preview is explicitly a sample and labels how many preview rows are shown out of the loaded source record count.
+- Readiness flags are visual chips: red for missing/sparse fields, gray for cluster/duplicate signals, and blue-gray for neutral/ok flags.
+
+## Current Databricks Runtime Posture
+
+The Databricks App should default to Unity Catalog for both source and resulting state:
+
+```text
+APP_DATA_MODE=unity_catalog
+APP_SOURCE_MODE=unity_catalog
+APP_STATE_MODE=unity_catalog
+APP_SOURCE_CATALOG=databricks_virtue_foundation_dataset_dais_2026
+APP_SOURCE_SCHEMA=virtue_foundation_dataset
+APP_SOURCE_TABLE=facilities
+APP_RESULT_CATALOG=dais_readiness_desk
+APP_SOURCE_ROW_LIMIT=10000
+APP_STATE_LOAD_TIMEOUT_SECONDS=45
+APP_STATE_CACHE_PREWARM=true
+APP_STATE_FALLBACK_ON_ERROR=false
+DATABRICKS_SQL_USE_CLOUD_FETCH=false
+```
+
+Important lesson from deployment debugging: Databricks SQL connector cloud fetch can try to download result chunks from cloud storage URLs such as `us-west-2.storage.cloud.databricks.com`. In the Databricks App runtime this failed with connection refused, causing `/api/state` to fall back to a tiny 3-row demo dataset. The fix is to run the SQL connector with `use_cloud_fetch=false` and disable silent DBX fallback.
+
+Current validation:
+
+- The configured Databricks source table loads 10,000 facility rows and 51 columns with cloud fetch disabled.
+- Full app state validation produced `backend=live`, `fallback=False`, and 100 preview rows.
+- The deployed app now prewarms state on startup and uses cache-first reads after live state is hydrated.
+
+## Current Agent Architecture
+
+The agent workflow is implemented as an eight-agent skeleton that can run locally inside FastAPI or through a Databricks multi-task Job:
+
+- IngestionManagerAgent
+- QAProfileAgent
+- DedupAgent
+- EvidenceSpecialtyAgent
+- GeoAgent
+- ShortageAgent
+- HumanReviewGateAgent
+- RiskAgent
+
+```mermaid
+flowchart LR
+  ingest[Ingestion Manager] --> qa[QA Profile]
+  qa --> dedup[Dedup]
+  qa --> evidence[Evidence/Specialty]
+  qa --> geo[Geo]
+  dedup --> shortage[Shortage]
+  evidence --> shortage
+  geo --> shortage
+  shortage --> review[Human Review Gate]
+  review --> risk[Risk Synthesis]
+  risk --> ui[Actions and Risk tabs]
+```
+
+Local mode is validated with `scripts/smoke_local_e2e.py`. Databricks Job mode is scaffolded and the job exists as `590750946177761`, but the multi-task job path still needs end-to-end validation.
