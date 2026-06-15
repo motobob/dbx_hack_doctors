@@ -172,6 +172,14 @@ button.primary:hover {
   margin-bottom: 14px;
 }
 
+.panel-head > div:first-child {
+  min-width: 0;
+}
+
+.panel-head p {
+  overflow-wrap: anywhere;
+}
+
 .panel h2 {
   margin: 0;
   font-size: 18px;
@@ -340,6 +348,7 @@ button.primary:hover {
 
 .button-row {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   align-items: center;
 }
@@ -523,7 +532,7 @@ tbody tr.selected {
 
 .queue-lanes {
   display: grid;
-  grid-template-columns: repeat(6, minmax(140px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(145px, 1fr));
   gap: 10px;
   margin-bottom: 12px;
 }
@@ -761,20 +770,22 @@ dd {
 
 .agent-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
   gap: 12px;
   margin-top: 12px;
 }
 
 @media (max-width: 900px) {
-  .agent-grid { grid-template-columns: repeat(2, 1fr); }
+  .agent-grid { grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); }
 }
 
 .agent-card {
+  min-width: 0;
   border: 1px solid var(--gray-lines);
   border-radius: 8px;
   background: #fff;
   padding: 12px;
+  overflow-wrap: anywhere;
 }
 
 .agent-ok    { border-color: var(--green-600); background: #eefaf5; }
@@ -784,8 +795,15 @@ dd {
 .agent-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
   margin-bottom: 6px;
+}
+
+.agent-header b {
+  min-width: 0;
+  line-height: 1.15;
 }
 
 .agent-detail {
@@ -801,11 +819,13 @@ dd {
 }
 
 .badge {
+  flex: 0 0 auto;
   font-size: 11px;
   font-weight: 600;
   padding: 2px 8px;
   border-radius: 999px;
   text-transform: capitalize;
+  white-space: nowrap;
 }
 
 .badge-ok      { background: #dff7ee; color: #007f56; }
@@ -821,11 +841,13 @@ dd {
 }
 
 .risk-summary {
+  min-width: 0;
   margin-top: 16px;
   padding: 12px 16px;
   border: 1px solid var(--gray-lines);
   border-radius: 8px;
   background: var(--oat-light);
+  overflow-wrap: anywhere;
 }
 
 .risk-summary h3 {
