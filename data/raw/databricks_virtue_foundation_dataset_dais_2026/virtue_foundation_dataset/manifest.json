@@ -1,0 +1,20 @@
+[
+  {
+    "table": "facilities",
+    "rows": 10088,
+    "csv": "data/raw/databricks_virtue_foundation_dataset_dais_2026/virtue_foundation_dataset/facilities/facilities.csv.gz",
+    "schema": "data/raw/databricks_virtue_foundation_dataset_dais_2026/virtue_foundation_dataset/facilities/schema.json"
+  },
+  {
+    "table": "india_post_pincode_directory",
+    "rows": 165627,
+    "csv": "data/raw/databricks_virtue_foundation_dataset_dais_2026/virtue_foundation_dataset/india_post_pincode_directory/india_post_pincode_directory.csv.gz",
+    "schema": "data/raw/databricks_virtue_foundation_dataset_dais_2026/virtue_foundation_dataset/india_post_pincode_directory/schema.json"
+  },
+  {
+    "table": "nfhs_5_district_health_indicators",
+    "rows": 706,
+    "csv": "data/raw/databricks_virtue_foundation_dataset_dais_2026/virtue_foundation_dataset/nfhs_5_district_health_indicators/nfhs_5_district_health_indicators.csv.gz",
+    "schema": "data/raw/databricks_virtue_foundation_dataset_dais_2026/virtue_foundation_dataset/nfhs_5_district_health_indicators/schema.json"
+  }
+]
