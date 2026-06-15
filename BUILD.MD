@@ -90,6 +90,12 @@ The app answers:
 
 ## Three-Minute Demo Script
 
+Presenter-ready demo materials now live in `demo/`:
+
+- `demo/DEMO_NARRATIVE.md`: high-level story and judging frame.
+- `demo/DEMO_SCRIPT.md`: timed click path and speaker notes.
+- `demo/DEMO_CHECKLIST.md`: live-readiness checklist before presenting.
+
 1. "We picked Track 4 because the real blocker is trust: this facility dataset is messy enough that a planner should not use it raw."
 2. "The app opens on the current dataset, current readiness numbers, and the problems dragging planning quality down."
 3. "Now we drop in more data. For the demo, we use `demo/data_readiness_demo_import.xlsx`, a 12-row XLSX with exact duplicates, near duplicates, sparse locations, weak NICU/emergency claims, and suspicious metadata."
@@ -104,6 +110,9 @@ The repository includes a purpose-built XLSX for click-through demos:
 
 - File: `demo/data_readiness_demo_import.xlsx`
 - Generator: `scripts/create_demo_import.py`
+- Narrative: `demo/DEMO_NARRATIVE.md`
+- Script: `demo/DEMO_SCRIPT.md`
+- Checklist: `demo/DEMO_CHECKLIST.md`
 - First sheet: `Facilities_Import`, which is the sheet parsed by `POST /api/import/preview`
 - Second sheet: `Demo_Notes`, which explains the intended demo beats
 

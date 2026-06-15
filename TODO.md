@@ -115,6 +115,7 @@ Completed/working now:
 - [x] Databricks Job setup script (`scripts/setup_dbx_job.py`).
 - [x] Local revalidation on 2026-06-15: Python compile, Vite build, and local eight-agent pipeline smoke all pass.
 - [x] Demo import XLSX generated from checked-in source data with intentional duplicate/sparse/weak-claim variations.
+- [x] Demo folder filled with narrative, three-minute script, checklist, and import workbook references.
 - [x] Import-driven pipeline smoke passes with demo XLSX: 12 incoming rows, 4 duplicate decisions, 3 row-quality flags, 30 review items.
 - [x] Local API-style E2E smoke test added and passing: `scripts/smoke_local_e2e.py`.
 - [x] KPI cards on `Current State` are clickable and navigate into filtered `Actions`.
@@ -147,7 +148,8 @@ flowchart LR
   - [ ] write `APP_RESULT_CATALOG.work/result/audit`
 - [ ] **P0 deploy smoke:** hard refresh deployed UI and verify it shows the real source catalog, `Live data`, 10,000 loaded facility records, and no `Warming cache`.
 - [ ] **P0 deploy API smoke:** open deployed `/api/status`, `/api/config`, `/api/state`, and `/api/diagnostics` from an authenticated browser session.
-- [ ] **P0 three-minute demo story:** verify the live app can show current numbers, import/stage, run agents, show proof/reject queue, and show risk recommendations without narration gaps.
+- [x] **P0 three-minute demo story:** add `demo/DEMO_NARRATIVE.md`, `demo/DEMO_SCRIPT.md`, and `demo/DEMO_CHECKLIST.md`.
+- [ ] **P0 live demo rehearsal:** verify the live app can show current numbers, import/stage, run agents, show proof/reject queue, and show risk recommendations without narration gaps.
 - [x] **P0 tab split:** separate `Import + Pipeline` from `Actions` and keep `Actions` as a dedicated proof/reject work queue.
 - [x] **P0 actionable queue:** add clickable queue lanes, selected-action next steps, status-aware decision buttons, and risk-to-actions handoff.
 - [x] **P0 DBX data-load fix:** disable SQL cloud fetch, prewarm state cache, increase timeout, and disable silent DBX fallback.

@@ -14,6 +14,15 @@ flowchart LR
   trusted --> risk[Medical desert risk planner]
 ```
 
+## Demo Materials
+
+The demo folder has the presenter-ready assets:
+
+- `demo/DEMO_NARRATIVE.md`: judging story and product framing.
+- `demo/DEMO_SCRIPT.md`: timed three-minute click-through.
+- `demo/DEMO_CHECKLIST.md`: pre-demo validation checklist.
+- `demo/data_readiness_demo_import.xlsx`: 12-row XLSX import designed to trigger duplicate, sparse-field, weak-claim, and review-gate signals.
+
 This repo is configured for local exploration of this Databricks workspace:
 
 - Workspace ID: `7474647758171864`
