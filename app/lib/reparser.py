@@ -143,6 +143,65 @@ def annotate_preview(df: pd.DataFrame) -> pd.DataFrame:
     return preview[[col for col in cols if col in preview.columns]]
 
 
+def enrich_action(action: dict[str, Any]) -> dict[str, Any]:
+    issue = action.get("issue_type", "")
+    owner = action.get("owner", "")
+    status = action.get("status", "")
+
+    defaults = {
+        "queue": "Open queue",
+        "next_step": "Review the evidence and decide whether this recommendation should change the resulting state.",
+        "primary_action": "Review action",
+        "secondary_action": "Needs more evidence",
+        "assignee": "Data steward",
+        "decision_required": True,
+    }
+    by_issue = {
+        "Duplicate cluster": {
+            "queue": "Human review",
+            "next_step": "Compare clustered rows, choose the winning source fields, then approve or reject the merge.",
+            "primary_action": "Approve merge",
+            "secondary_action": "Reject merge",
+            "assignee": "Data steward",
+        },
+        "NICU review": {
+            "queue": "Evidence review",
+            "next_step": "Check source text for neonatal/NICU evidence before this facility counts in planning coverage.",
+            "primary_action": "Confirm claim",
+            "secondary_action": "Reject claim",
+            "assignee": "Clinical reviewer",
+        },
+        "Location quality": {
+            "queue": "Agent ready",
+            "next_step": "Let the geo cleanup agent normalize location fields and stage the safe fix for audit.",
+            "primary_action": "Apply safe fix",
+            "secondary_action": "Send to review",
+            "assignee": "Geo cleanup agent",
+        },
+        "Capability evidence": {
+            "queue": "Evidence review",
+            "next_step": "Verify whether capability claims have supporting equipment, procedure, or specialty text.",
+            "primary_action": "Confirm claim",
+            "secondary_action": "Reject claim",
+            "assignee": "Clinical reviewer",
+        },
+        "Tag review": {
+            "queue": "Steward triage",
+            "next_step": "Turn scratchpad tags into review slices for the next parse run.",
+            "primary_action": "Apply tags",
+            "secondary_action": "Skip tags",
+            "assignee": "Data steward",
+        },
+    }
+    enriched = {**defaults, **by_issue.get(issue, {}), **action}
+    if status in {"Approved", "Applied", "Rejected"}:
+        enriched["queue"] = "Closed"
+        enriched["decision_required"] = False
+    elif owner == "AI agent" and status == "Ready":
+        enriched["queue"] = "Agent ready"
+    return enriched
+
+
 def build_actions(df: pd.DataFrame, profile: dict[str, Any], scratchpad: str) -> pd.DataFrame:
     tags = profile.get("tags", [])
     actions = [
@@ -201,6 +260,7 @@ def build_actions(df: pd.DataFrame, profile: dict[str, Any], scratchpad: str) ->
                 "evidence": "Scratchpad includes #nicu and dataset contains neonatal/newborn indicators.",
             },
         )
+    actions = [enrich_action(action) for action in actions]
     actions_df = pd.DataFrame(actions)
     actions_df.insert(0, "action_id", [sha1(row["recommendation"].encode()).hexdigest()[:8] for _, row in actions_df.iterrows()])
     return actions_df

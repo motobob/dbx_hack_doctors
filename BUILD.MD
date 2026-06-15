@@ -294,11 +294,12 @@ Key interactions:
 
 Implementation notes:
 
-- Use React tabs and filters for queue segments.
+- Use React tabs, queue lanes, and filters for queue segments.
 - Use explicit API calls for inline status changes.
 - Apply actions through explicit buttons, not automatic table edits.
 - Store reviewer notes and status changes.
 - Persist action state to `action_recommendations`.
+- Queue items carry workflow metadata: queue, next step, primary action, secondary action, assignee, decision-required flag, evidence, confidence, and lift.
 
 ### Confidence Model
 
@@ -1034,7 +1035,7 @@ The current app is a clickable Databricks App skeleton with a local/offline mode
 - Local scratchpad state in `app/state/scratchpad.md`.
 - Local/generated re-parse state in `app/state/last_run.json`.
 - Source/state loader in `app/lib/store.py` for checked-in CSV, Unity Catalog, and demo fallback modes.
-- Mock profiling, recommendation, and risk generator in `app/lib/reparser.py`.
+- Mock profiling, actionable queue recommendation, and risk generator in `app/lib/reparser.py`.
 - Multi-agent pipeline in `app/lib/pipeline.py` and `app/lib/agents/`.
 - Databricks Job task entrypoint in `app/jobs/run_agent.py`.
 - Databricks Foundation Models client in `app/lib/llm.py`.
@@ -1049,7 +1050,9 @@ Current workflow:
 5. FastAPI regenerates profile metrics, actions, tags, and risk recommendations.
 6. In local state mode, resulting state is written to `app/state`.
 7. In Databricks state mode, resulting state is written to `APP_RESULT_CATALOG.result.*` and `APP_RESULT_CATALOG.audit.*`.
-8. React UI refreshes the three tabs from `GET /api/state`.
+8. React UI refreshes the four tabs from `GET /api/state`.
+9. The Actions tab presents queue lanes for human review, agent-ready fixes, evidence review, steward triage, and closed decisions.
+10. Selected action decisions are written through `POST /api/actions/{action_id}/decision`; in Unity Catalog state mode they update `result.action_recommendations` and append `result.action_decisions` plus audit events.
 
 Current data backend modes:
 

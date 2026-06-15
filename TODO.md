@@ -141,10 +141,11 @@ flowchart LR
 - [ ] **P0 deploy smoke:** open deployed `/api/status`, `/api/config`, `/api/state`, and `/api/diagnostics`.
 - [ ] **P0 three-minute demo story:** verify the live app can show current numbers, import/stage, run agents, show proof/reject queue, and show risk recommendations without narration gaps.
 - [x] **P0 tab split:** separate `Import + Pipeline` from `Actions` and keep `Actions` as a dedicated proof/reject work queue.
+- [x] **P0 actionable queue:** add clickable queue lanes, selected-action next steps, status-aware decision buttons, and risk-to-actions handoff.
 - [ ] **P1 pipeline persistence:** persist agent outputs from `app/lib/agents/` into Unity Catalog work/result tables.
 - [x] **P1 target agents:** add skeleton Ingestion Manager, QA/Profile Agent, Evidence/Specialty Agent, and Human Review Gate.
-- [ ] **P1 proof/reject UX:** turn HumanReviewGate output into explicit Accept / Reject / Needs evidence controls.
-- [ ] **P1 action comments:** add required/free-text comment capture for accepted/rejected actions.
+- [x] **P1 proof/reject UX:** turn HumanReviewGate output into explicit Accept / Reject / Needs evidence controls.
+- [x] **P1 action comments:** add required/free-text comment capture for accepted/rejected actions.
 - [ ] **P1 risk UI:** wire RiskAgent output into the `Risk Recommendations` tab instead of mock rows.
 - [ ] **P1 import staging:** add `POST /api/import/stage` and stage uploaded rows into source/work tables.
 - [ ] **P2 UX polish:** split React components, add table pagination, add toasts, and add confidence/status chips.
@@ -160,12 +161,14 @@ flowchart LR
 - [x] Add table sorting and text search for Dataset Preview.
 - [ ] Add table sorting and text search for Recommendations and Risks.
 - [ ] Add pagination or virtual scrolling for dataset preview and action rows.
-- [ ] Add visible loading states for save, re-parse, upload preview, and action decisions.
+- [x] Add visible loading states for action decisions.
+- [ ] Add visible loading states for save, re-parse, and upload preview.
 - [ ] Add toast/banner feedback for save success and API errors.
-- [ ] Add a richer selected-action side panel.
-- [ ] Add confidence/status chips instead of raw text.
+- [x] Add a richer selected-action side panel.
+- [x] Add queue/status chips instead of raw queue text.
 - [x] Add a Markdown preview toggle for the scratchpad.
-- [ ] Add "jump to Actions" behavior from Current State drivers.
+- [x] Add "jump to Actions" behavior from Current State drivers.
+- [x] Add "jump to Actions" behavior from Risk Recommendation detail.
 
 ## Phase 2: Durable Local State
 

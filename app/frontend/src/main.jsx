@@ -521,11 +521,52 @@ function ImportPipeline({ scratchpad, setScratchpad, onSaveScratchpad, onReparse
   );
 }
 
+function inferredQueue(action) {
+  if (!action) return "Open queue";
+  if (["Approved", "Applied", "Rejected"].includes(action.status)) return "Closed";
+  if (action.queue) return action.queue;
+  if (action.owner === "AI agent" || action.status === "Ready") return "Agent ready";
+  if (action.issue_type?.includes("evidence") || action.issue_type?.includes("NICU")) return "Evidence review";
+  if (action.status === "Needs review" || action.owner === "Human") return "Human review";
+  return "Open queue";
+}
+
+function actionButtonsFor(action) {
+  const queue = inferredQueue(action);
+  if (queue === "Agent ready") {
+    return [
+      { label: action.primary_action || "Apply safe fix", status: "Applied", tone: "primary", noteRequired: true },
+      { label: action.secondary_action || "Send to review", status: "Needs review", noteRequired: false },
+      { label: "Reject", status: "Rejected", noteRequired: true }
+    ];
+  }
+  if (queue === "Evidence review") {
+    return [
+      { label: action.primary_action || "Confirm claim", status: "Approved", tone: "primary", noteRequired: true },
+      { label: action.secondary_action || "Reject claim", status: "Rejected", noteRequired: true },
+      { label: "Needs more evidence", status: "Needs evidence", noteRequired: false }
+    ];
+  }
+  if (queue === "Closed") {
+    return [
+      { label: "Reopen", status: "Needs review", noteRequired: true }
+    ];
+  }
+  return [
+    { label: action?.primary_action || "Approve", status: "Approved", tone: "primary", noteRequired: true },
+    { label: action?.secondary_action || "Reject", status: "Rejected", noteRequired: true },
+    { label: "Needs review", status: "Needs review", noteRequired: false }
+  ];
+}
+
 function ActionsQueue({ state, onDecision, focus }) {
   const actions = state.run.actions || [];
-  const [filters, setFilters] = useState({ priority: "All", owner: "All", status: "All", issue: "All" });
+  const [filters, setFilters] = useState({ queue: "All", priority: "All", owner: "All", status: "All", issue: "All" });
   const [selected, setSelected] = useState(actions[0] || null);
   const [note, setNote] = useState("");
+  const [decisionError, setDecisionError] = useState("");
+  const [decisionSaved, setDecisionSaved] = useState("");
+  const [decisionBusy, setDecisionBusy] = useState("");
 
   useEffect(() => {
     if (focus) {
@@ -533,20 +574,62 @@ function ActionsQueue({ state, onDecision, focus }) {
     }
   }, [focus]);
 
-  const filtered = actions.filter((action) => {
+  const queueOrder = ["All", "Human review", "Agent ready", "Evidence review", "Steward triage", "Open queue", "Closed"];
+  const filtered = useMemo(() => actions.filter((action) => {
+    const queue = inferredQueue(action);
     return (
+      (filters.queue === "All" || queue === filters.queue) &&
       (filters.priority === "All" || action.priority === filters.priority) &&
       (filters.owner === "All" || action.owner === filters.owner) &&
       (filters.status === "All" || action.status === filters.status) &&
       (filters.issue === "All" || action.issue_type === filters.issue)
     );
-  });
+  }), [actions, filters]);
 
   useEffect(() => {
     if (!selected || !filtered.some((action) => action.action_id === selected.action_id)) {
-      setSelected(filtered[0] || null);
+      chooseAction(filtered[0] || null);
     }
   }, [filtered, selected]);
+
+  function chooseAction(action) {
+    setSelected(action);
+    setNote(action?.review_note || "");
+    setDecisionError("");
+    setDecisionSaved("");
+  }
+
+  async function decide(button) {
+    if (!selected) return;
+    const trimmed = note.trim();
+    if (button.noteRequired && !trimmed) {
+      setDecisionSaved("");
+      setDecisionError("Add a short note before saving this decision.");
+      return;
+    }
+    setDecisionBusy(button.status);
+    setDecisionError("");
+    setDecisionSaved("");
+    try {
+      await onDecision(selected.action_id, button.status, trimmed);
+      setDecisionSaved(`${button.label} saved to the action queue.`);
+    } catch (error) {
+      setDecisionError(error.message);
+    } finally {
+      setDecisionBusy("");
+    }
+  }
+
+  function applyFilter(next) {
+    setFilters((current) => ({ ...current, ...next }));
+  }
+
+  const queueCounts = queueOrder.slice(1).map((queue) => ({
+    queue,
+    count: actions.filter((action) => inferredQueue(action) === queue).length
+  }));
+  const selectedQueue = inferredQueue(selected);
+  const decisionButtons = selected ? actionButtonsFor(selected) : [];
 
   return (
     <section className="page-grid">
@@ -567,24 +650,53 @@ function ActionsQueue({ state, onDecision, focus }) {
             ))}
           </div>
         </div>
+        <div className="queue-lanes">
+          <button className={filters.queue === "All" ? "queue-lane active" : "queue-lane"} onClick={() => applyFilter({ queue: "All" })}>
+            <span>All actions</span>
+            <b>{actions.length.toLocaleString()}</b>
+            <small>full queue</small>
+          </button>
+          {queueCounts.map(({ queue, count }) => (
+            <button key={queue} className={filters.queue === queue ? "queue-lane active" : "queue-lane"} onClick={() => applyFilter({ queue })}>
+              <span>{queue}</span>
+              <b>{count.toLocaleString()}</b>
+              <small>{queue === "Agent ready" ? "safe fix candidates" : queue === "Closed" ? "decided items" : "proof/reject work"}</small>
+            </button>
+          ))}
+        </div>
         <div className="queue-summary">
           <Metric label="Visible actions" value={filtered.length.toLocaleString()} detail="current filters" />
-          <Metric label="Needs review" value={actions.filter((a) => a.status === "Needs review").length.toLocaleString()} detail="human queue" tone="risk" />
-          <Metric label="Ready" value={actions.filter((a) => a.status === "Ready").length.toLocaleString()} detail="safe-fix candidates" />
-          <Metric label="Human owned" value={actions.filter((a) => a.owner === "Human").length.toLocaleString()} detail="proof/reject needed" tone="warn" />
+          <Metric label="Needs review" value={actions.filter((a) => inferredQueue(a) === "Human review").length.toLocaleString()} detail="human queue" tone="risk" />
+          <Metric label="Agent ready" value={actions.filter((a) => inferredQueue(a) === "Agent ready").length.toLocaleString()} detail="safe-fix candidates" />
+          <Metric label="Decision required" value={actions.filter((a) => a.decision_required !== false && inferredQueue(a) !== "Closed").length.toLocaleString()} detail="open proof/reject items" tone="warn" />
         </div>
         <DataTable
           rows={filtered}
           selectedId={selected?.action_id}
-          onRowClick={(row) => setSelected(row)}
+          onRowClick={chooseAction}
           columns={[
+            { key: "queue", label: "Queue", render: (row) => <span className={`queue-chip queue-${inferredQueue(row).toLowerCase().replaceAll(" ", "-")}`}>{inferredQueue(row)}</span> },
             { key: "priority", label: "Priority" },
             { key: "issue_type", label: "Issue" },
             { key: "recommendation", label: "Recommendation" },
             { key: "owner", label: "Owner" },
             { key: "confidence", label: "Confidence" },
-            { key: "lift_points", label: "Lift" },
-            { key: "status", label: "Status" }
+            { key: "status", label: "Status" },
+            {
+              key: "action",
+              label: "Action",
+              render: (row) => (
+                <button
+                  className="small-button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    chooseAction(row);
+                  }}
+                >
+                  Work item
+                </button>
+              )
+            }
           ]}
         />
       </div>
@@ -595,13 +707,20 @@ function ActionsQueue({ state, onDecision, focus }) {
           {selected ? (
             <>
               <p className="recommendation">{selected.recommendation}</p>
+              <div className="next-action">
+                <span className={`queue-chip queue-${selectedQueue.toLowerCase().replaceAll(" ", "-")}`}>{selectedQueue}</span>
+                <h3>Next step</h3>
+                <p>{selected.next_step || "Review the evidence and save a decision."}</p>
+              </div>
               <dl>
+                <dt>Assignee</dt>
+                <dd>{selected.assignee || selected.owner}</dd>
                 <dt>Evidence</dt>
                 <dd>{selected.evidence}</dd>
-                <dt>Owner</dt>
-                <dd>{selected.owner}</dd>
                 <dt>Confidence</dt>
                 <dd>{selected.confidence}</dd>
+                <dt>Lift</dt>
+                <dd>{selected.lift_points} pts</dd>
               </dl>
             </>
           ) : (
@@ -609,29 +728,44 @@ function ActionsQueue({ state, onDecision, focus }) {
           )}
         </div>
         <div>
-          <h2>Comment / Tag</h2>
-          <textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="Add a review note, e.g. #dedupe verify source priority..." />
+          <h2>Decision Note</h2>
+          <textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="Add the proof/reject rationale, source preference, or reviewer tag..." />
+          {decisionError ? <div className="form-error">{decisionError}</div> : null}
+          {decisionSaved ? <div className="success-note">{decisionSaved}</div> : null}
           <div className="button-row">
-            {["Approved", "Rejected", "Needs review"].map((status) => (
-              <button key={status} disabled={!selected} onClick={() => onDecision(selected.action_id, status, note)}>
-                {status}
+            {decisionButtons.map((button) => (
+              <button
+                key={button.status}
+                className={button.tone === "primary" ? "primary" : ""}
+                disabled={!selected || Boolean(decisionBusy)}
+                onClick={() => decide(button)}
+              >
+                {decisionBusy === button.status ? "Saving..." : button.label}
               </button>
             ))}
           </div>
+          <p className="helper-text">Decisions persist to the current result state and become audit events in Unity Catalog mode.</p>
         </div>
       </div>
     </section>
   );
 }
 
-function RiskRecommendations({ state }) {
+function RiskRecommendations({ state, onActionJump }) {
   const risks = state.run.risks || [];
   const [selected, setSelected] = useState(risks[0] || null);
   const [confidence, setConfidence] = useState("All");
+  const [planningNote, setPlanningNote] = useState("");
+  const [noteSaved, setNoteSaved] = useState("");
   const riskRows = useMemo(
     () => risks.filter((risk) => confidence === "All" || risk.confidence === confidence),
     [risks, confidence]
   );
+
+  function openRelatedQueue() {
+    onActionJump({ queue: "All", issue: "Location quality", status: "All", owner: "All" });
+  }
+
   return (
     <section className="page-grid">
       <div className="panel full">
@@ -670,6 +804,10 @@ function RiskRecommendations({ state }) {
               <p className="recommendation">{selected.risk} in {selected.location}, {selected.state}</p>
               <p>{selected.why}</p>
               <p>{selected.look_at}</p>
+              <div className="button-row">
+                <button className="primary" onClick={openRelatedQueue}>Open cleanup actions</button>
+                <button onClick={() => onActionJump({ queue: "Evidence review", issue: "All", status: "All", owner: "All" })}>Open evidence queue</button>
+              </div>
             </>
           ) : (
             <p>Select a risk row to inspect.</p>
@@ -677,8 +815,9 @@ function RiskRecommendations({ state }) {
         </div>
         <div>
           <h2>Planning Note</h2>
-          <textarea placeholder="Save a note for the planning team..." />
-          <button>Save planning note</button>
+          <textarea value={planningNote} onChange={(event) => setPlanningNote(event.target.value)} placeholder="Save a note for the planning team..." />
+          {noteSaved ? <div className="success-note">{noteSaved}</div> : null}
+          <button onClick={() => setNoteSaved("Planning note staged for this demo session.")}>Save planning note</button>
         </div>
       </div>
     </section>
@@ -798,7 +937,7 @@ function App() {
   }
 
   function jumpToActions(focus) {
-    setActionFocus({ priority: "All", issue: "All", owner: "All", status: "All", ...focus });
+    setActionFocus({ queue: "All", priority: "All", issue: "All", owner: "All", status: "All", ...focus });
     setActiveTab("Actions");
   }
 
@@ -878,7 +1017,7 @@ function App() {
         />
       ) : null}
       {activeTab === "Actions" ? <ActionsQueue state={state} onDecision={actionDecision} focus={actionFocus} /> : null}
-      {activeTab === "Risk Recommendations" ? <RiskRecommendations state={state} /> : null}
+      {activeTab === "Risk Recommendations" ? <RiskRecommendations state={state} onActionJump={jumpToActions} /> : null}
     </main>
   );
 }

@@ -225,13 +225,16 @@ def load_last_run() -> dict[str, Any]:
             ORDER BY priority, risk_id
             """
         )
-        run["actions"] = [
-            {
-                **row,
-                "evidence": json.loads(row.get("evidence_json") or "{}").get("evidence", ""),
-            }
-            for row in actions.fillna("").to_dict(orient="records")
-        ]
+        run["actions"] = []
+        for row in actions.fillna("").to_dict(orient="records"):
+            evidence_json = json.loads(row.get("evidence_json") or "{}")
+            run["actions"].append(
+                {
+                    **row,
+                    **{key: value for key, value in evidence_json.items() if key != "evidence"},
+                    "evidence": evidence_json.get("evidence", ""),
+                }
+            )
         run["risks"] = [
             {
                 **row,
@@ -319,7 +322,15 @@ def save_last_run(payload: dict[str, Any]) -> None:
                   {sql_literal(action.get("confidence"))},
                   {sql_literal(action.get("status"))},
                   {sql_literal(action.get("lift_points"))},
-                  {json_literal({"evidence": action.get("evidence", "")})},
+                  {json_literal({
+                      "evidence": action.get("evidence", ""),
+                      "queue": action.get("queue", ""),
+                      "next_step": action.get("next_step", ""),
+                      "primary_action": action.get("primary_action", ""),
+                      "secondary_action": action.get("secondary_action", ""),
+                      "assignee": action.get("assignee", ""),
+                      "decision_required": action.get("decision_required", True),
+                  })},
                   CAST({sql_literal(now)} AS TIMESTAMP),
                   CAST({sql_literal(now)} AS TIMESTAMP)
                 )
