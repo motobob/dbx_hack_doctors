@@ -8,6 +8,27 @@ Primary challenge track: **Track 4 - Data Readiness Desk**
 
 Downstream outcome: **Track 2 - Medical Desert Planner**
 
+## Top-Level Demo Posture
+
+We are solving **Track 4** with **Track 2 in mind**. The product story is not "here is another dashboard." It is: messy scraped healthcare data should flow through an agent-led readiness pipeline, with humans only approving or rejecting material findings, and the planning-risk view should emerge as a side effect of making the data trustworthy.
+
+For a three-minute demo, the arc is:
+
+1. Start with the current messy dataset and show that it cannot yet be trusted for planning.
+2. Drop in or stage new data from a file, website scrape, or update feed.
+3. Run the agent pipeline: ingest, QA, dedupe, evidence, geo, shortage, review gate, risk.
+4. Show the system found the problems automatically and separated safe fixes from human-review items.
+5. Show the downstream planning effect: which places, doctors, facilities, or specialties now look risky because the cleaned/trust-weighted data says so.
+
+```mermaid
+flowchart LR
+  story[3 minute demo story] --> track4[Track 4: Data Readiness Desk]
+  track4 --> agents[Agent-led data cleanup]
+  agents --> review[Human proof / reject]
+  review --> result[Trusted resulting state]
+  result --> track2[Track 2 side effect: risk planner]
+```
+
 ## Problem We Are Solving
 
 The source dataset has useful facility information, but it is not clean enough to trust for planning. Facility names may be duplicated, locations may be sparse or inconsistent, descriptions may contain uneven claims, and claimed capabilities may contradict structured fields.
@@ -43,6 +64,7 @@ The app answers:
    - User uploads XLS/XLSX/CSV facility files.
    - App validates columns, previews rows, and maps uploaded fields into the canonical facility schema.
    - Uploaded records are staged, profiled, and compared against existing records before merge.
+   - Demo artifact: `demo/data_readiness_demo_import.xlsx` contains 12 rows derived from the checked-in facility data with intentional duplicates, sparse location fields, weak capability claims, and suspicious metadata.
 
 3. **Profile and Deduplicate**
    - Detect exact duplicates.
@@ -66,15 +88,53 @@ The app answers:
    - App translates cleaned, trust-weighted data into risk recommendations.
    - Example: "Look at XYZ district and these doctors/facilities because maternity evidence is weak, records are sparse, and nearest trusted alternative is far away."
 
+## Three-Minute Demo Script
+
+1. "We picked Track 4 because the real blocker is trust: this facility dataset is messy enough that a planner should not use it raw."
+2. "The app opens on the current dataset, current readiness numbers, and the problems dragging planning quality down."
+3. "Now we drop in more data. For the demo, we use `demo/data_readiness_demo_import.xlsx`, a 12-row XLSX with exact duplicates, near duplicates, sparse locations, weak NICU/emergency claims, and suspicious metadata."
+4. "Instead of asking a human to clean rows manually, the Databricks agent workflow does the first pass: ingestion, QA, dedupe, evidence extraction, geo checks, shortage analysis, and a review gate."
+5. "The output is a proof/reject queue: safe fixes can be accepted quickly, risky changes are held for human confirmation, and every item carries evidence and confidence."
+6. "As a side effect of that trusted resulting state, the risk planner shows where care gaps may be real versus where we are just looking at bad or sparse data."
+7. "That is the end-to-end promise: Track 4 cleanup creates the Track 2 planning surface."
+
+## Demo Import Workbook
+
+The repository includes a purpose-built XLSX for click-through demos:
+
+- File: `demo/data_readiness_demo_import.xlsx`
+- Generator: `scripts/create_demo_import.py`
+- First sheet: `Facilities_Import`, which is the sheet parsed by `POST /api/import/preview`
+- Second sheet: `Demo_Notes`, which explains the intended demo beats
+
+The workbook intentionally includes:
+
+- Exact existing-name duplicates, such as `Fortis Hospital, Gurugram`, `All India Institute of Medical Sciences Patna`, `HCG Manavata Cancer Centre`, and `Civil Hospital`.
+- Near duplicates and related-site ambiguity, such as `Fortis Hospital Gurgaon`, `AIIMS Patna Emergency Annex`, and `City Care Hosp.`.
+- Sparse location rows with blank city or PIN code.
+- Weak or suspicious clinical claims around NICU, emergency, trauma, surgery, oncology, and maternity.
+- A suspicious `yearEstablished` value and sparse operating fields for review storytelling.
+
+Latest local validation with `AGENT_LLM_ENABLED=false`:
+
+- 12 incoming rows parsed from the XLSX.
+- All eight agents completed.
+- Ingestion reported 3 row-quality flags.
+- Dedup reported 4 exact duplicate decisions.
+- HumanReviewGate reported 30 review items and crossed the material planning impact threshold.
+
 ## UX and UI Mockups
 
 The app should feel like a Databricks-native operational dashboard: dense, calm, evidence-first, and optimized for repeated review work. The MVP should use **three primary tabs** instead of a deep navigation tree:
 
-- `Current Dataset`
-- `Import + Actions`
+- `Current State`
+- `Import + Pipeline`
+- `Actions`
 - `Risk Recommendations`
 
-This keeps the hackathon story clean: first show what is wrong with the current dataset, then let the user add data and review fixes, then show what the cleaned evidence means for planning.
+This keeps the hackathon story clean: first show the current dataset mission control view, then import/stage data and run the cleansing pipeline, then show what the agents found and what needs proof/reject, then show what the cleaned evidence means for planning.
+
+Decision note from the 2026-06-15 demo review: import belongs with the current dataset/current state workflow, not inside Actions. Actions should be the prioritized list of what is broken and what the user should approve, reject, comment on, or assign.
 
 Databricks Apps assumptions:
 
@@ -93,7 +153,7 @@ Databricks Apps assumptions:
 | Data Readiness Desk                                   Catalog: dais_2026          |
 | Track 4 cleanup -> Track 2 planning                   Last run: 2026-06-15 09:42  |
 +----------------------------------------------------------------------------------+
-| [Current Dataset] [Import + Actions] [Risk Recommendations]                       |
+| [Current State] [Import + Pipeline] [Actions] [Risk Recommendations]              |
 +----------------------------------------------------------------------------------+
 | Page content                                                                      |
 +----------------------------------------------------------------------------------+
@@ -116,13 +176,13 @@ Global design rules:
 - Never hide uncertainty; show confidence beside every recommendation.
 - Keep every recommendation tied to source evidence.
 
-### Tab 1: Current Dataset Mockup
+### Tab 1: Current State Mockup
 
-Purpose: This is the landing page. It shows the current dataset, current numbers, data readiness score, and the highest-level evidence that the dataset needs cleanup before planning.
+Purpose: This is the landing page. It shows the current dataset, current numbers, data readiness score, executive summary, and dataset preview before planning.
 
 ```text
 +----------------------------------------------------------------------------------+
-| Current Dataset                                                                  |
+| Current State                                                                    |
 | What we know right now about the facility dataset                                 |
 +-------------------+-------------------+-------------------+----------------------+
 | Consistency Score | Expected Lift     | Duplicate Clusters| Human Review Queue   |
@@ -146,15 +206,16 @@ Purpose: This is the landing page. It shows the current dataset, current numbers
 | Shree Mat.    | Jaipur   | blank    | maternity         | weak NICU evidence     |
 | Apex Hosp.    | Patna    | 800001   | emergency surgery | missing source date    |
 +----------------------------------------------------------------------------------+
-| Primary actions: [Run Profile] [Import More Data] [Open Recommendations]          |
+| Import: [Drop XLS/XLSX/CSV] [Validate Import] [Run Agent Pipeline]                |
+| Primary actions: [Run Profile] [Open Actions] [Export Preview CSV]                |
 ```
 
 Key interactions:
 
 - Clicking a KPI filters the dataset preview and recommendation list.
-- Clicking a driver switches to `Import + Actions` with that issue type selected.
+- Clicking a driver switches to `Actions` with that issue type selected.
 - `Run Profile` recomputes the latest readiness snapshot.
-- `Import More Data` switches to the import section in the second tab.
+- `Validate Import` previews the workbook/CSV before running the agent pipeline.
 
 Implementation notes:
 
@@ -164,20 +225,31 @@ Implementation notes:
 - Read state from `GET /api/state`.
 - Persist KPI snapshots to `readiness_kpi_snapshot`.
 
-### Tab 2: Import + Actions Mockup
+### Tab 2: Import + Pipeline Mockup
 
-Purpose: This is the workbench. It combines XLS/XLSX/CSV import with the list of recommendations and actions found in the data. Dedupe, findings, and human review live here as sections.
+Purpose: This is the cleansing workbench. It owns XLS/XLSX/CSV import, scratchpad context, and pipeline execution before any trusted state changes.
+
+Key interactions:
+
+- User uploads XLS/XLSX/CSV and previews parsed rows.
+- Scratchpad notes/tags can be saved and used to trigger re-parse.
+- User runs the eight-agent pipeline.
+- Agent cards show ingestion, QA, dedupe, evidence, geo, shortage, review gate, and risk status.
+
+### Tab 3: Actions Mockup
+
+Purpose: This is the Track 4 workbench output. It shows the list of recommendations and actions found in the current/staged data. Dedupe, findings, and human review live here as sections.
 
 ```text
 +----------------------------------------------------------------------------------+
-| Import + Actions                                                                 |
-| Add data, validate it, then review the recommended fixes                          |
+| Actions                                                                          |
+| Review the recommended fixes and proof/reject material findings                   |
 +----------------------------------------+-----------------------------------------+
-| Upload File                            | Import Quality                          |
-| [ Drop XLS/XLSX/CSV here           ]   | Parsed rows: 2,140                       |
-| Source name: [ district_partner_june ] | Required fields present: 81%             |
-| Import mode: [Stage only v]            | Likely duplicates: 187                   |
-| [Validate Import] [Stage Records]      | Import readiness: 69%                    |
+| Latest Pipeline Run                    | Review Queue                             |
+| Ingested rows: 12                      | Needs human review: 30                   |
+| Duplicate decisions: 4                 | Auto-fix ready: 8                        |
+| Row-quality flags: 3                   | Planning-impacting: 3                    |
+| [Open Current Import] [Run Again]      | [Export Review CSV]                      |
 +----------------------------------------+-----------------------------------------+
 | Column Mapping                                                                  |
 | Uploaded column        -> Canonical field           Status                       |
@@ -213,7 +285,7 @@ Purpose: This is the workbench. It combines XLS/XLSX/CSV import with the list of
 
 Key interactions:
 
-- User uploads XLS/XLSX/CSV, validates it, and stages records.
+- User arrives here after profiling the current state or running an import pipeline.
 - The action table shows all recommendations found in both the current dataset and staged imports.
 - Selecting an action opens the evidence/detail panel.
 - AI-owned actions can be applied in batch only when confidence is high.
@@ -222,16 +294,17 @@ Key interactions:
 
 Implementation notes:
 
-- Use React file input/dropzone with `POST /api/import/preview`.
-- Use `pandas.read_csv` and `pandas.read_excel` in FastAPI for upload preview.
-- Push staged rows into Unity Catalog only after validation.
 - Use React tabs and filters for queue segments.
 - Use explicit API calls for inline status changes.
 - Apply actions through explicit buttons, not automatic table edits.
 - Store reviewer notes and status changes.
 - Persist action state to `action_recommendations`.
 
-### Tab 3: Risk Recommendations Mockup
+### Confidence Model
+
+MVP confidence is row-level, not field-level. The core question is whether a facility row is trusted enough to count in planning or send someone there. Field-level confidence is a later enhancement for high-value fields such as geocode, PIN code, specialty/capability, and provenance.
+
+### Tab 4: Risk Recommendations Mockup
 
 Purpose: This is the Track 2 outcome. It uses the cleaned and trust-weighted evidence to recommend locations, doctors, and facilities to investigate.
 
@@ -276,7 +349,7 @@ The visual direction should be practical and credible for healthcare data operat
 
 Layout:
 
-- Three top-level tabs: `Current Dataset`, `Import + Actions`, and `Risk Recommendations`.
+- Target top-level tabs: `Current State`, `Import + Pipeline`, `Actions`, and `Risk Recommendations`.
 - Page title and short context line at top.
 - Main filters in a compact horizontal row.
 - KPI cards across the top of the landing tab.
@@ -329,9 +402,9 @@ Error states:
 
 ## Core Tab Requirements
 
-### 1. Current Dataset
+### 1. Current State
 
-Purpose: The landing tab. Let a planner understand the current dataset before any new import or cleanup.
+Purpose: The landing tab. Let a planner understand the current dataset, update scratchpad context, import/stage new data, and trigger the pipeline before cleanup decisions.
 
 Widgets:
 
@@ -343,6 +416,8 @@ Widgets:
 - Suspicious capability claim count.
 - Current dataset stats: records, states, districts, sources, last profile run.
 - Dataset preview with readiness flags.
+- XLS/XLSX/CSV upload preview.
+- Import readiness and required field checks.
 
 Primary CTA:
 
@@ -351,26 +426,37 @@ Primary CTA:
 Secondary CTAs:
 
 - `Run Profile`
-- `Import More Data`
+- `Validate Import`
+- `Run Agent Pipeline`
 
-### 2. Import + Actions
+### 2. Import + Pipeline
 
-Purpose: Let users drop more data into the workflow and act on the recommendations found in the current and staged data.
+Purpose: Let users drop more data into the cleansing workflow, adjust scratchpad context, and run the agent pipeline.
 
 Features:
 
 - XLS/XLSX/CSV upload.
-- Column mapping assistant.
+- Preview of first 50 rows.
 - Required field validation.
-- Preview of first 100 rows.
-- Schema mismatch warnings.
-- Staged import table.
 - Import quality score before commit.
+- Scratchpad View/Edit and save.
+- Trigger re-parse.
+- Run pipeline in analysis or ingest mode.
+- Agent status cards.
+
+### 3. Actions
+
+Purpose: Let users act on the recommendations found in the current and staged data.
+
+Features:
+
 - Recommendation/action list.
 - Dedupe cluster review.
 - Evidence drawer for selected action.
 - AI safe-fix batch action.
 - Human review decisions.
+- Comments and proof/reject reason capture.
+- Owner/reviewer assignment.
 - Export review CSV.
 - Audit event capture.
 
@@ -744,15 +830,42 @@ Append-only operational history.
 
 ## AI Pipeline Architecture
 
-The app supports a multi-agent AI re-parse pipeline triggered by `POST /api/pipeline/start`. It runs in two modes controlled by `PIPELINE_MODE`:
+The current app supports a multi-agent AI re-parse pipeline triggered by `POST /api/pipeline/start`. It runs in two modes controlled by `PIPELINE_MODE`.
+
+The 2026-06-15 design session refined the target architecture from a flat agent list into an ingestion-led workflow. The design note is saved at `docs/design-session-2026-06-15-agent-architecture.md`.
+
+Current skeleton architecture:
 
 ```mermaid
 flowchart LR
-  start[POST /api/pipeline/start] --> dedup[DedupAgent]
-  dedup --> geo[GeoAgent]
+  ingest[Ingestion Manager] --> qa[QA/Profile Agent]
+  qa --> dedupe[Dedupe Agent]
+  qa --> evidence[Evidence and Specialty Agent]
+  qa --> geo[Geo Agent]
+  dedupe --> decision[Insert Update Duplicate Review]
+  evidence --> trust[Trust Scoring]
+  geo --> trust
+  decision --> review{Human review?}
+  trust --> review
+  review --> result[Result state version]
+  result --> risk[Risk Planning Agent]
+```
+
+Implemented skeleton workflow:
+
+```mermaid
+flowchart LR
+  start[POST /api/pipeline/start] --> ingest[IngestionManagerAgent]
+  ingest --> qa[QAProfileAgent]
+  qa --> dedup[DedupAgent]
+  qa --> evidence[EvidenceSpecialtyAgent]
+  qa --> geo[GeoAgent]
   dedup --> shortage[ShortageAgent]
-  geo --> risk[RiskAgent]
+  evidence --> shortage
+  geo --> shortage
   shortage --> risk
+  shortage --> review[HumanReviewGateAgent]
+  review --> risk
   risk --> outputs[Readiness score actions risks]
   outputs --> ui[Pipeline status panel and tabs]
   outputs --> uc[(Unity Catalog result tables)]
@@ -764,24 +877,32 @@ Runs inside the FastAPI process using `asyncio`:
 
 ```mermaid
 flowchart LR
-  dedup[dedup] --> geo[geo]
+  ingestion[ingestion] --> qa[qa]
+  qa --> dedup[dedup]
+  qa --> evidence[evidence]
+  qa --> geo[geo]
   dedup --> shortage[shortage]
-  geo --> risk[risk]
+  evidence --> shortage
+  geo --> shortage
+  shortage --> review[review]
+  review --> risk[risk]
   shortage --> risk
 ```
 
-State is written to `app/state/pipeline_{id}.json` and symlinked via `pipeline_current.json`. The frontend polls `GET /api/pipeline/status/{id}` every 3 seconds during execution.
+State is written to `app/state/pipeline_{id}.json` and tracked through a `pipeline_current.json` pointer. The frontend polls `GET /api/pipeline/status/{id}` every 3 seconds during execution.
 
 ### Databricks mode (`PIPELINE_MODE=databricks`)
 
 Triggers a multi-task Databricks Job:
 
-- Task 1: `dedup` (no dependency)
-- Task 2: `geo` (depends on dedup)
-- Task 3: `shortage` (depends on dedup, runs in parallel with geo)
-- Task 4: `risk` (depends on geo + shortage)
+- Task 1: `ingestion` (no dependency)
+- Task 2: `qa` (depends on ingestion)
+- Task 3: `dedup`, `evidence`, and `geo` (depend on qa)
+- Task 4: `shortage` (depends on dedup, evidence, and geo)
+- Task 5: `review` (depends on shortage plus upstream evidence)
+- Task 6: `risk` (depends on review)
 
-Each task runs `jobs/run_agent.py <agent_name>` and shares state via the Databricks Workspace API. The FastAPI app polls the job run and mirrors task states into the pipeline state JSON.
+Each task runs `jobs/run_agent.py <agent_name> <pipeline_id>` and shares state via the Databricks Workspace API. The FastAPI app polls the job run and mirrors task states into the pipeline state JSON.
 
 ```mermaid
 sequenceDiagram
@@ -821,18 +942,37 @@ In ingest mode, the agent returns per-record decisions:
 
 ### Agent outputs
 
-- **DedupAgent**: cluster merge/split/review decisions (analysis mode) or insert/update/duplicate/review per incoming record (ingest mode)
+- **IngestionManagerAgent**: upload/schema routing, required-field checks, column-shift suspicion, and ingest route.
+- **QAProfileAgent**: completeness, sparsity, suspicious metadata, and record-level QA flags.
+- **DedupAgent**: cluster merge/split/review decisions (analysis mode) or insert/update/duplicate/review per incoming record (ingest mode).
+- **EvidenceSpecialtyAgent**: specialty/capability evidence extraction skeleton and claim review flags.
 - **GeoAgent**: flagged records, coverage gaps, geographic summary
 - **ShortageAgent**: shortage areas by state/care type, severity levels
-- **RiskAgent**: risk matrix, executive summary, `data_readiness_score`, `planning_readiness_score`
+- **HumanReviewGateAgent**: review queue triggers for ambiguous duplicates, weak evidence, geo flags, and planning-impacting issues.
+- **RiskAgent**: risk matrix, executive summary, `data_readiness_score`, `planning_readiness_score`.
 
 Detailed agent contracts and pipeline state are maintained in `app/lib/agents/SPEC.md`.
 
 Current deploy status:
 
 - Local agent mode is implemented.
+- Local eight-agent skeleton was revalidated on 2026-06-15: Python compile passed, frontend build passed, and a local pipeline run completed `ingestion`, `qa`, `dedup`, `evidence`, `geo`, `shortage`, `review`, and `risk`.
+- Local API-style end-to-end smoke test is implemented at `scripts/smoke_local_e2e.py` and passes against the demo XLSX import path.
 - Databricks Job mode is scaffolded with `scripts/setup_dbx_job.py`.
 - Databricks Job mode is **not verified deployed** until `DATABRICKS_PIPELINE_JOB_ID` is created, app env is updated to `PIPELINE_MODE=databricks`, and an end-to-end run completes.
+- Deployed skeleton currently uses `PIPELINE_MODE=local` and `AGENT_LLM_ENABLED=false` for predictable click-through behavior.
+
+Local smoke command:
+
+```bash
+.venv/bin/python scripts/smoke_local_e2e.py
+```
+
+Expected marker:
+
+```text
+LOCAL_E2E_SMOKE_OK
+```
 
 ### LLM backend
 
@@ -1049,8 +1189,9 @@ Goal: A clickable dashboard that tells the story end to end with real or sample 
 Deliverables:
 
 - FastAPI + React/Vite Databricks App skeleton.
-- `Current Dataset` tab with KPI cards, current stats, and dataset preview.
-- `Import + Actions` tab with upload control for XLS/XLSX/CSV.
+- `Current State` tab with KPI cards, current stats, executive summary, and dataset preview.
+- `Import + Pipeline` tab with upload, scratchpad, and agent execution.
+- `Actions` tab with proof/reject workflow, comments, and action table.
 - Mocked or live recommendation/action table.
 - `Risk Recommendations` tab with planning-risk table.
 - Basic evidence drawer for one selected recommendation.

@@ -21,7 +21,7 @@ from typing import Any
 APP_DIR = Path(__file__).resolve().parents[1]
 STATE_DIR = APP_DIR / "state"
 
-AGENT_NAMES = ["dedup", "geo", "shortage", "risk"]
+AGENT_NAMES = ["ingestion", "qa", "dedup", "evidence", "geo", "shortage", "review", "risk"]
 
 # ── state shape ──────────────────────────────────────────────────────────────
 
@@ -67,8 +67,15 @@ def _current_path() -> Path:
 
 def save(state: dict) -> None:
     pid = state["pipeline_id"]
-    _state_path(pid).write_text(json.dumps(state, indent=2), encoding="utf-8")
-    _current_path().write_text(json.dumps({"pipeline_id": pid}, encoding="utf-8"), encoding="utf-8")
+    state_path = _state_path(pid)
+    state_tmp = state_path.with_suffix(".json.tmp")
+    state_tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    state_tmp.replace(state_path)
+
+    current_path = _current_path()
+    current_tmp = current_path.with_suffix(".json.tmp")
+    current_tmp.write_text(json.dumps({"pipeline_id": pid}), encoding="utf-8")
+    current_tmp.replace(current_path)
 
 
 def load(pipeline_id: str) -> dict | None:
@@ -103,12 +110,7 @@ def workspace_save(state: dict) -> None:
         json.dumps(state, indent=2).encode()
     ).decode()
     pid = state["pipeline_id"]
-
-    for path in [
-        _workspace_state_path(pid),
-        _workspace_state_path("current").replace("pipeline_current", "pipeline_current"),
-    ]:
-        w.workspace.import_(path=path, content=content, overwrite=True)
+    w.workspace.import_(path=_workspace_state_path(pid), content=content, overwrite=True)
 
     # Also write the current pointer
     cur_content = base64.b64encode(

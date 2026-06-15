@@ -3,7 +3,7 @@
 Creates (or updates) the Databricks multi-task pipeline Job.
 
 DAG:
-  dedup  →  geo + shortage (parallel)  →  risk
+  ingestion → qa → dedup + evidence + geo → shortage → review → risk
 
 Run once after deploy:
     python scripts/setup_dbx_job.py
@@ -27,10 +27,12 @@ if ENV_FILE.exists():
             os.environ.setdefault(k.strip(), v.strip())
 
 from databricks.sdk import WorkspaceClient
+from databricks.sdk.service.compute import Environment
 from databricks.sdk.service.jobs import (
-    JobCluster,
+    JobEnvironment,
+    JobParameterDefinition,
     JobSettings,
-    PythonWheelTask,
+    QueueSettings,
     SparkPythonTask,
     Task,
     TaskDependency,
@@ -59,29 +61,33 @@ def build_job_settings() -> JobSettings:
     return JobSettings(
         name=JOB_NAME,
         environments=[
-            {
-                "environment_key": "pipeline_env",
-                "spec": {
-                    "client": "1",
-                    "dependencies": [
+            JobEnvironment(
+                environment_key="pipeline_env",
+                spec=Environment(
+                    client="1",
+                    dependencies=[
                         "fastapi", "uvicorn", "pandas", "openpyxl", "pyarrow",
                         "python-multipart", "databricks-sdk", "databricks-sql-connector",
                         "openai",
                     ],
-                },
-            }
+                ),
+            )
         ],
         tasks=[
-            task("dedup"),
-            task("geo",      depends_on=["dedup"]),
-            task("shortage", depends_on=["dedup"]),
-            task("risk",     depends_on=["geo", "shortage"]),
+            task("ingestion"),
+            task("qa",        depends_on=["ingestion"]),
+            task("dedup",     depends_on=["qa"]),
+            task("evidence",  depends_on=["qa"]),
+            task("geo",       depends_on=["qa"]),
+            task("shortage",  depends_on=["dedup", "evidence", "geo"]),
+            task("review",    depends_on=["dedup", "evidence", "geo", "shortage"]),
+            task("risk",      depends_on=["review"]),
         ],
         parameters=[
-            {"name": "pipeline_id", "default": ""},
+            JobParameterDefinition(name="pipeline_id", default=""),
         ],
         # Serverless compute — no cluster config needed
-        queue={"enabled": True},
+        queue=QueueSettings(enabled=True),
     )
 
 

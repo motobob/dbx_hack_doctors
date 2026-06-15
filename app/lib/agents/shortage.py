@@ -72,6 +72,41 @@ class ShortageAgent(BaseAgent):
                 })
 
         dedup_summary = upstream.get("dedup", {}).get("summary", {})
+        if not self.llm_enabled():
+            shortage_areas = []
+            for item in state_summary:
+                capability_ratio = (item["has_capability_data"] + item["has_specialty_data"]) / max(item["facility_count"] * 2, 1)
+                if capability_ratio < 0.35:
+                    shortage_areas.append(
+                        {
+                            "state": item["state"],
+                            "district_or_city": "",
+                            "care_types_missing": ["ICU", "NICU", "Emergency"],
+                            "severity": "high" if capability_ratio < 0.15 else "medium",
+                            "facility_count": item["facility_count"],
+                            "evidence": "Sparse capability/specialty evidence in skeleton shortage scan.",
+                            "data_confidence": "low" if capability_ratio < 0.15 else "medium",
+                        }
+                    )
+            top = shortage_areas[0]["state"] if shortage_areas else ""
+            return {
+                "shortage_areas": shortage_areas[:25],
+                "capability_gaps": [
+                    {
+                        "care_type": "Emergency",
+                        "affected_states": [area["state"] for area in shortage_areas[:10]],
+                        "gap_severity": "medium",
+                    }
+                ] if shortage_areas else [],
+                "summary": {
+                    "critical_shortage_states": sum(1 for area in shortage_areas if area["severity"] == "critical"),
+                    "total_shortage_areas": len(shortage_areas),
+                    "most_underserved_state": top,
+                    "top_missing_care_type": "Emergency" if shortage_areas else "",
+                    "dedup_review_count": dedup_summary.get("review_count", 0),
+                },
+                "skeleton": True,
+            }
 
         user_msg = (
             f"Analyse healthcare shortages across {len(df):,} facilities "

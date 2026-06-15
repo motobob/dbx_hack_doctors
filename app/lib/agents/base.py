@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
+import os
 
 import pandas as pd
 
@@ -53,6 +54,15 @@ class BaseAgent:
             [{"role": "system", "content": system}, {"role": "user", "content": user}],
             **kwargs,
         )
+
+    @staticmethod
+    def llm_enabled() -> bool:
+        setting = os.getenv("AGENT_LLM_ENABLED", "").strip().lower()
+        if setting in {"1", "true", "yes", "on"}:
+            return True
+        if setting in {"0", "false", "no", "off"}:
+            return False
+        return bool(os.getenv("DATABRICKS_TOKEN"))
 
     @staticmethod
     def _sample(df: pd.DataFrame, n: int = 60) -> str:

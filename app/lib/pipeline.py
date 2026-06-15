@@ -1,7 +1,7 @@
 """
 Pipeline orchestrator.
 
-DAG:  dedup  →  geo + shortage (parallel)  →  risk
+DAG: ingestion → qa → dedup + evidence + geo → shortage → review → risk
 
 Two execution modes (PIPELINE_MODE env var):
   local       — asyncio tasks in the FastAPI process (default)
@@ -17,7 +17,16 @@ from typing import Any
 import pandas as pd
 
 from . import pipeline_state as ps
-from .agents import DedupAgent, GeoAgent, RiskAgent, ShortageAgent
+from .agents import (
+    DedupAgent,
+    EvidenceSpecialtyAgent,
+    GeoAgent,
+    HumanReviewGateAgent,
+    IngestionManagerAgent,
+    QAProfileAgent,
+    RiskAgent,
+    ShortageAgent,
+)
 from .store import read_facilities
 
 
@@ -40,7 +49,7 @@ def _run_agent_sync(agent, df: pd.DataFrame, state: dict, upstream: dict) -> dic
 
 
 async def _run_pipeline_local(pipeline_id: str) -> None:
-    """Full pipeline in asyncio — dedup, then geo+shortage parallel, then risk."""
+    """Full pipeline in asyncio following the ingestion-led design-session DAG."""
     state = ps.load(pipeline_id)
     if state is None:
         return
@@ -55,27 +64,32 @@ async def _run_pipeline_local(pipeline_id: str) -> None:
     df = await loop.run_in_executor(None, read_facilities)
 
     try:
-        # ── stage 1: dedup (or ingest, if incoming_records in upstream) ─────
-        dedup_result = await loop.run_in_executor(
-            None, _run_agent_sync, DedupAgent(), df, state, upstream
-        )
+        # ── stage 1: ingestion routing + QA ────────────────────────────────
+        ingestion_result = await loop.run_in_executor(None, _run_agent_sync, IngestionManagerAgent(), df, state, upstream)
+        upstream["ingestion"] = ingestion_result
+
+        qa_result = await loop.run_in_executor(None, _run_agent_sync, QAProfileAgent(), df, state, upstream)
+        upstream["qa"] = qa_result
+
+        # ── stage 2: dedup + evidence + geo ───────────────────────────────
+        dedup_result = await loop.run_in_executor(None, _run_agent_sync, DedupAgent(), df, state, dict(upstream))
         upstream["dedup"] = dedup_result
 
-        # ── stage 2: geo + shortage in parallel ────────────────────────────
-        geo_task = loop.run_in_executor(
-            None, _run_agent_sync, GeoAgent(), df, state, dict(upstream)
-        )
-        shortage_task = loop.run_in_executor(
-            None, _run_agent_sync, ShortageAgent(), df, state, dict(upstream)
-        )
-        geo_result, shortage_result = await asyncio.gather(geo_task, shortage_task)
+        evidence_result = await loop.run_in_executor(None, _run_agent_sync, EvidenceSpecialtyAgent(), df, state, dict(upstream))
+        upstream["evidence"] = evidence_result
+
+        geo_result = await loop.run_in_executor(None, _run_agent_sync, GeoAgent(), df, state, dict(upstream))
         upstream["geo"] = geo_result
+
+        # ── stage 3: shortage + human review gate ─────────────────────────
+        shortage_result = await loop.run_in_executor(None, _run_agent_sync, ShortageAgent(), df, state, dict(upstream))
         upstream["shortage"] = shortage_result
 
-        # ── stage 3: risk ───────────────────────────────────────────────────
-        risk_result = await loop.run_in_executor(
-            None, _run_agent_sync, RiskAgent(), df, state, upstream
-        )
+        review_result = await loop.run_in_executor(None, _run_agent_sync, HumanReviewGateAgent(), df, state, dict(upstream))
+        upstream["review"] = review_result
+
+        # ── stage 4: risk planning synthesis ──────────────────────────────
+        risk_result = await loop.run_in_executor(None, _run_agent_sync, RiskAgent(), df, state, upstream)
         upstream["risk"] = risk_result
 
         ps.finish_pipeline(state)
@@ -100,6 +114,10 @@ def _trigger_databricks_job(pipeline_id: str) -> str:
             "DATABRICKS_PIPELINE_JOB_ID not set. Run: python scripts/setup_dbx_job.py"
         )
 
+    state = ps.load(pipeline_id)
+    if state:
+        ps.workspace_save(state)
+
     run = w.jobs.run_now(
         job_id=int(job_id),
         job_parameters={"pipeline_id": pipeline_id},
@@ -113,7 +131,16 @@ async def _poll_databricks_job(pipeline_id: str, run_id: str) -> None:
     from databricks.sdk.service.jobs import RunLifeCycleState
 
     w = WorkspaceClient()
-    task_to_agent = {"dedup": "dedup", "geo": "geo", "shortage": "shortage", "risk": "risk"}
+    task_to_agent = {
+        "ingestion": "ingestion",
+        "qa": "qa",
+        "dedup": "dedup",
+        "evidence": "evidence",
+        "geo": "geo",
+        "shortage": "shortage",
+        "review": "review",
+        "risk": "risk",
+    }
 
     while True:
         await asyncio.sleep(10)

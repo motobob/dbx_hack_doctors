@@ -54,6 +54,42 @@ class GeoAgent(BaseAgent):
         state_col = "address_stateOrRegion"
         city_col = "address_city"
         pin_col = "address_zipOrPostcode"
+        if not self.llm_enabled():
+            missing_location = df[
+                [
+                    column
+                    for column in [state_col, city_col, pin_col]
+                    if column in df.columns
+                ]
+            ].fillna("").astype(str).apply(lambda row: any(not value.strip() for value in row), axis=1) if len(df) else pd.Series(dtype=bool)
+            flagged_count = int(missing_location.sum()) if len(df) else 0
+            coverage_gaps = []
+            if state_col in df.columns:
+                counts = df[state_col].fillna("Unknown").astype(str).value_counts()
+                coverage_gaps = [
+                    {"state": state, "issue": "very low density", "severity": "medium"}
+                    for state, count in counts.tail(min(5, len(counts))).items()
+                    if count < max(3, len(df) * 0.002)
+                ]
+            return {
+                "flagged_records": [
+                    {
+                        "name": str(row.get("name", "")),
+                        "issue": "missing location fields",
+                        "detail": "Record is missing at least one state/city/PIN value.",
+                        "state": str(row.get(state_col, "")),
+                        "city": str(row.get(city_col, "")),
+                    }
+                    for _, row in df[missing_location].head(20).fillna("").iterrows()
+                ] if len(df) else [],
+                "coverage_gaps": coverage_gaps,
+                "summary": {
+                    "flagged_count": flagged_count,
+                    "gap_states": len(coverage_gaps),
+                    "overall_geo_quality_score": max(0, round(100 - flagged_count / max(len(df), 1) * 100)),
+                },
+                "skeleton": True,
+            }
 
         state_dist = (
             df[state_col].fillna("Unknown").value_counts().head(20).to_dict()

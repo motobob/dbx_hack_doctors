@@ -2,12 +2,21 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
-const tabs = ["Current Dataset", "Import + Actions", "Risk Recommendations"];
+const tabs = ["Current State", "Import + Pipeline", "Actions", "Risk Recommendations"];
 
 async function api(path, options = {}, timeoutMs = 25000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
-  const response = await fetch(path, { ...options, signal: controller.signal }).finally(() => clearTimeout(timer));
+  const method = options.method || "GET";
+  const response = await fetch(path, {
+    cache: method === "GET" ? "no-store" : "default",
+    ...options,
+    headers: {
+      ...(method === "GET" ? { "Cache-Control": "no-cache" } : {}),
+      ...(options.headers || {}),
+    },
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timer));
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.detail || `Request failed: ${response.status}`);
@@ -15,13 +24,14 @@ async function api(path, options = {}, timeoutMs = 25000) {
   return response.json();
 }
 
-function Metric({ label, value, detail, tone = "neutral" }) {
+function Metric({ label, value, detail, tone = "neutral", onClick }) {
+  const Tag = onClick ? "button" : "div";
   return (
-    <div className={`metric metric-${tone}`}>
+    <Tag className={`metric metric-${tone} ${onClick ? "metric-clickable" : ""}`} onClick={onClick}>
       <div className="metric-label">{label}</div>
       <div className="metric-value">{value}</div>
       {detail ? <div className="metric-detail">{detail}</div> : null}
-    </div>
+    </Tag>
   );
 }
 
@@ -142,7 +152,7 @@ function DataTable({ rows, columns, onRowClick, selectedId, sort, onSort }) {
   );
 }
 
-function CurrentDataset({ state, scratchpad, setScratchpad, onSaveScratchpad, onReparse, busy }) {
+function CurrentState({ state, onActionJump }) {
   const profile = state.run.profile;
   const components = profile.score_components || {};
   const previewColumns = [
@@ -153,7 +163,6 @@ function CurrentDataset({ state, scratchpad, setScratchpad, onSaveScratchpad, on
     { key: "organization_type", label: "Type" },
     { key: "readiness_flags", label: "Readiness flags" }
   ];
-  const [scratchpadMode, setScratchpadMode] = useState("view");
   const [previewSearch, setPreviewSearch] = useState("");
   const [previewSort, setPreviewSort] = useState({ key: "name", direction: "asc" });
   const previewRows = useMemo(() => {
@@ -187,48 +196,43 @@ function CurrentDataset({ state, scratchpad, setScratchpad, onSaveScratchpad, on
     <section className="page-grid">
       <div className="full">
         <div className="metric-grid">
-          <Metric label="Data consistency" value={`${profile.consistency_score}%`} detail={`+${profile.expected_lift} pts possible`} tone="warn" />
-          <Metric label="Facilities" value={profile.row_count.toLocaleString()} detail="current dataset" />
-          <Metric label="Duplicate clusters" value={profile.duplicate_clusters.toLocaleString()} detail="dedupe candidates" />
-          <Metric label="Human review" value={profile.human_review_queue.toLocaleString()} detail="records/actions" tone="risk" />
+          <Metric
+            label="Data consistency"
+            value={`${profile.consistency_score}%`}
+            detail={`+${profile.expected_lift} pts possible · open all actions`}
+            tone="warn"
+            onClick={() => onActionJump({ issue: "All", status: "All", owner: "All" })}
+          />
+          <Metric
+            label="Facilities"
+            value={profile.row_count.toLocaleString()}
+            detail="open readiness actions"
+            onClick={() => onActionJump({ issue: "All", status: "All", owner: "All" })}
+          />
+          <Metric
+            label="Duplicate clusters"
+            value={profile.duplicate_clusters.toLocaleString()}
+            detail="open dedupe recommendations"
+            onClick={() => onActionJump({ issue: "Duplicate cluster", status: "All", owner: "All" })}
+          />
+          <Metric
+            label="Human review"
+            value={profile.human_review_queue.toLocaleString()}
+            detail="open human queue"
+            tone="risk"
+            onClick={() => onActionJump({ issue: "All", status: "Needs review", owner: "Human" })}
+          />
         </div>
-      </div>
-
-      <div className="panel scratchpad">
-        <div className="panel-head">
-          <div>
-            <h2>Scratchpad</h2>
-            <p>Markdown notes, comments, and tags that steer the next parse.</p>
-          </div>
-          <div className="button-row wrap">
-            <div className="segmented">
-              <button className={scratchpadMode === "view" ? "active" : ""} onClick={() => setScratchpadMode("view")}>
-                View
-              </button>
-              <button className={scratchpadMode === "edit" ? "active" : ""} onClick={() => setScratchpadMode("edit")}>
-                Edit
-              </button>
-            </div>
-            <button onClick={onSaveScratchpad}>Save</button>
-            <button className="primary" onClick={onReparse} disabled={busy}>
-              {busy ? "Parsing..." : "Trigger re-parse"}
-            </button>
-          </div>
-        </div>
-        {scratchpadMode === "edit" ? (
-          <textarea value={scratchpad} onChange={(event) => setScratchpad(event.target.value)} spellCheck="false" />
-        ) : (
-          <div className="markdown-view">{renderMarkdown(scratchpad)}</div>
-        )}
       </div>
 
       <div className="panel current-numbers">
         <div className="panel-head">
           <div>
-            <h2>Current Numbers</h2>
-            <p className="dataset-path">{state.catalog}.{state.schema}.{state.table}</p>
+            <h2>Mission Control</h2>
+            <p>Executive summary for the current source/resulting state.</p>
           </div>
         </div>
+        <p className="dataset-path">{state.catalog}.{state.schema}.{state.table}</p>
         <div className="mini-grid">
           <Metric label="States" value={profile.state_count.toLocaleString()} />
           <Metric label="Cities" value={profile.city_count.toLocaleString()} />
@@ -241,6 +245,26 @@ function CurrentDataset({ state, scratchpad, setScratchpad, onSaveScratchpad, on
         </div>
         <div className="tag-line">
           {(profile.tags || []).length ? profile.tags.map((tag) => <span key={tag}>#{tag}</span>) : <span>No tags yet</span>}
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <div>
+            <h2>What This Means</h2>
+            <p>These numbers are navigation into the work queue, not passive KPIs.</p>
+          </div>
+        </div>
+        <div className="callout-list">
+          <button onClick={() => onActionJump({ issue: "Duplicate cluster", status: "All", owner: "All" })}>
+            Dedupe recommendations affect facility counts and coverage.
+          </button>
+          <button onClick={() => onActionJump({ issue: "Location quality", status: "All", owner: "All" })}>
+            Sparse or weak locations reduce planning confidence.
+          </button>
+          <button onClick={() => onActionJump({ issue: "NICU review", status: "All", owner: "Human" })}>
+            Clinical claims need evidence before planners trust them.
+          </button>
         </div>
       </div>
 
@@ -283,8 +307,17 @@ function CurrentDataset({ state, scratchpad, setScratchpad, onSaveScratchpad, on
   );
 }
 
-const AGENT_NAMES = ["dedup", "geo", "shortage", "risk"];
-const AGENT_LABELS = { dedup: "De-dup", geo: "Geo filter", shortage: "Shortage", risk: "Risk synthesis" };
+const AGENT_NAMES = ["ingestion", "qa", "dedup", "evidence", "geo", "shortage", "review", "risk"];
+const AGENT_LABELS = {
+  ingestion: "Ingest",
+  qa: "QA profile",
+  dedup: "De-dup",
+  evidence: "Evidence",
+  geo: "Geo filter",
+  shortage: "Shortage",
+  review: "Review gate",
+  risk: "Risk synthesis"
+};
 const STATUS_TONE = { completed: "ok", failed: "risk", running: "warn", pending: "neutral", idle: "neutral" };
 
 function AgentCard({ name, agentState }) {
@@ -298,6 +331,16 @@ function AgentCard({ name, agentState }) {
         <span className={`badge badge-${tone}`}>{status}</span>
       </div>
       {agentState?.error ? <p className="agent-error">{agentState.error}</p> : null}
+      {status === "completed" && name === "ingestion" && result.summary ? (
+        <p className="agent-detail">
+          {result.incoming_count ?? 0} incoming · route: {result.route || "qa_ready"}
+        </p>
+      ) : null}
+      {status === "completed" && name === "qa" && result.summary ? (
+        <p className="agent-detail">
+          Quality: {result.overall_quality_score ?? "—"}% · {result.summary.flag_count ?? 0} flags
+        </p>
+      ) : null}
       {status === "completed" && name === "dedup" && result.mode === "ingest" && result.summary ? (
         <p className="agent-detail">
           {result.summary.insert_count ?? 0} insert · {result.summary.update_count ?? 0} update · {result.summary.duplicate_count ?? 0} dup · {result.summary.review_count ?? 0} review
@@ -313,9 +356,19 @@ function AgentCard({ name, agentState }) {
           {result.flagged_records?.length ?? 0} flagged · {result.coverage_gaps?.length ?? 0} gaps
         </p>
       ) : null}
+      {status === "completed" && name === "evidence" && result.summary ? (
+        <p className="agent-detail">
+          {result.summary.review_claims ?? 0} claims for review
+        </p>
+      ) : null}
       {status === "completed" && name === "shortage" && result.summary ? (
         <p className="agent-detail">
           {result.shortage_areas?.filter((a) => a.severity === "critical").length ?? 0} critical areas
+        </p>
+      ) : null}
+      {status === "completed" && name === "review" && result.summary ? (
+        <p className="agent-detail">
+          {result.summary.review_count ?? 0} review items · impact {result.summary.material_planning_impact_score ?? 0}
         </p>
       ) : null}
       {status === "completed" && name === "risk" ? (
@@ -342,8 +395,8 @@ function PipelinePanel({ pipeline, onStart, busy, ingestRecords }) {
           <h2>AI Pipeline</h2>
           <p>
             {ingestRecords
-              ? `Ingest mode: ${ingestRecords.length} incoming records → Dedup → Geo + Shortage → Risk.`
-              : "Analysis mode: Dedup → Geo + Shortage (parallel) → Risk synthesis."}
+              ? `Ingest mode: ${ingestRecords.length} incoming records → QA → Dedupe/Evidence/Geo → Shortage → Review → Risk.`
+              : "Analysis mode: Ingest → QA → Dedupe/Evidence/Geo → Shortage → Review → Risk."}
             {pipeline?.pipeline_id ? <span className="run-id"> Run: {pipeline.pipeline_id}</span> : null}
             {pipeline?.mode ? <span className="run-id"> [{pipeline.mode}]</span> : null}
           </p>
@@ -386,22 +439,11 @@ function PipelinePanel({ pipeline, onStart, busy, ingestRecords }) {
   );
 }
 
-function ImportActions({ state, pipeline, onPipelineStart, pipelineBusy, onDecision }) {
+function ImportPipeline({ scratchpad, setScratchpad, onSaveScratchpad, onReparse, busy, pipeline, onPipelineStart, pipelineBusy }) {
   const [upload, setUpload] = useState(null);
   const [uploadError, setUploadError] = useState("");
   const [uploadPreview, setUploadPreview] = useState(null);
-  const [filters, setFilters] = useState({ priority: "All", owner: "All", status: "All" });
-  const [selected, setSelected] = useState((state.run.actions || [])[0] || null);
-  const [note, setNote] = useState("");
-
-  const actions = state.run.actions || [];
-  const filtered = actions.filter((action) => {
-    return (
-      (filters.priority === "All" || action.priority === filters.priority) &&
-      (filters.owner === "All" || action.owner === filters.owner) &&
-      (filters.status === "All" || action.status === filters.status)
-    );
-  });
+  const [scratchpadMode, setScratchpadMode] = useState("view");
 
   async function previewUpload(file) {
     setUpload(file);
@@ -448,22 +490,88 @@ function ImportActions({ state, pipeline, onPipelineStart, pipelineBusy, onDecis
         ingestRecords={uploadPreview?.preview || null}
       />
 
+      <div className="panel scratchpad full">
+        <div className="panel-head">
+          <div>
+            <h2>Scratchpad</h2>
+            <p>Markdown notes, comments, and tags that steer the next parse.</p>
+          </div>
+          <div className="button-row wrap">
+            <div className="segmented">
+              <button className={scratchpadMode === "view" ? "active" : ""} onClick={() => setScratchpadMode("view")}>
+                View
+              </button>
+              <button className={scratchpadMode === "edit" ? "active" : ""} onClick={() => setScratchpadMode("edit")}>
+                Edit
+              </button>
+            </div>
+            <button onClick={onSaveScratchpad}>Save</button>
+            <button className="primary" onClick={onReparse} disabled={busy}>
+              {busy ? "Parsing..." : "Trigger re-parse"}
+            </button>
+          </div>
+        </div>
+        {scratchpadMode === "edit" ? (
+          <textarea value={scratchpad} onChange={(event) => setScratchpad(event.target.value)} spellCheck="false" />
+        ) : (
+          <div className="markdown-view">{renderMarkdown(scratchpad)}</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ActionsQueue({ state, onDecision, focus }) {
+  const actions = state.run.actions || [];
+  const [filters, setFilters] = useState({ priority: "All", owner: "All", status: "All", issue: "All" });
+  const [selected, setSelected] = useState(actions[0] || null);
+  const [note, setNote] = useState("");
+
+  useEffect(() => {
+    if (focus) {
+      setFilters((current) => ({ ...current, ...focus }));
+    }
+  }, [focus]);
+
+  const filtered = actions.filter((action) => {
+    return (
+      (filters.priority === "All" || action.priority === filters.priority) &&
+      (filters.owner === "All" || action.owner === filters.owner) &&
+      (filters.status === "All" || action.status === filters.status) &&
+      (filters.issue === "All" || action.issue_type === filters.issue)
+    );
+  });
+
+  useEffect(() => {
+    if (!selected || !filtered.some((action) => action.action_id === selected.action_id)) {
+      setSelected(filtered[0] || null);
+    }
+  }, [filtered, selected]);
+
+  return (
+    <section className="page-grid">
       <div className="panel full">
         <div className="panel-head">
           <div>
             <h2>Recommendations / Actions</h2>
-            <p>Operational queue generated from the current parse.</p>
+            <p>Operational proof/reject queue generated from the current parse and imports.</p>
           </div>
           <div className="filters">
-            {["priority", "owner", "status"].map((key) => (
+            {["priority", "issue", "owner", "status"].map((key) => (
               <select key={key} value={filters[key]} onChange={(event) => setFilters({ ...filters, [key]: event.target.value })}>
                 <option>All</option>
-                {[...new Set(actions.map((action) => action[key]))].map((value) => (
+                {[...new Set(actions.map((action) => (key === "issue" ? action.issue_type : action[key])).filter(Boolean))].map((value) => (
                   <option key={value}>{value}</option>
                 ))}
               </select>
             ))}
           </div>
+        </div>
+        <div className="queue-summary">
+          <Metric label="Visible actions" value={filtered.length.toLocaleString()} detail="current filters" />
+          <Metric label="Needs review" value={actions.filter((a) => a.status === "Needs review").length.toLocaleString()} detail="human queue" tone="risk" />
+          <Metric label="Ready" value={actions.filter((a) => a.status === "Ready").length.toLocaleString()} detail="safe-fix candidates" />
+          <Metric label="Human owned" value={actions.filter((a) => a.owner === "Human").length.toLocaleString()} detail="proof/reject needed" tone="warn" />
         </div>
         <DataTable
           rows={filtered}
@@ -579,6 +687,7 @@ function RiskRecommendations({ state }) {
 
 function App() {
   const [activeTab, setActiveTab] = useState(tabs[0]);
+  const [actionFocus, setActionFocus] = useState(null);
   const [state, setState] = useState(null);
   const [config, setConfig] = useState(null);
   const [scratchpad, setScratchpad] = useState("");
@@ -688,6 +797,11 @@ function App() {
     await refresh();
   }
 
+  function jumpToActions(focus) {
+    setActionFocus({ priority: "All", issue: "All", owner: "All", status: "All", ...focus });
+    setActiveTab("Actions");
+  }
+
   if (error) {
     return (
       <main className="app-shell">
@@ -745,25 +859,25 @@ function App() {
         ))}
       </nav>
 
-      {activeTab === "Current Dataset" ? (
-        <CurrentDataset
+      {activeTab === "Current State" ? (
+        <CurrentState
           state={state}
+          onActionJump={jumpToActions}
+        />
+      ) : null}
+      {activeTab === "Import + Pipeline" ? (
+        <ImportPipeline
           scratchpad={scratchpad}
           setScratchpad={setScratchpad}
           onSaveScratchpad={saveScratchpad}
           onReparse={reparse}
           busy={busy}
-        />
-      ) : null}
-      {activeTab === "Import + Actions" ? (
-        <ImportActions
-          state={state}
           pipeline={pipeline}
           onPipelineStart={startPipeline}
           pipelineBusy={pipelineBusy}
-          onDecision={actionDecision}
         />
       ) : null}
+      {activeTab === "Actions" ? <ActionsQueue state={state} onDecision={actionDecision} focus={actionFocus} /> : null}
       {activeTab === "Risk Recommendations" ? <RiskRecommendations state={state} /> : null}
     </main>
   );

@@ -2,6 +2,18 @@
 
 DBX 2026 hackathon workspace tooling.
 
+## Demo Thesis
+
+This app solves **Track 4: Data Readiness Desk** while keeping **Track 2: Medical Desert Planner** as the downstream outcome. In the demo, messy facility records flow through an agent-led readiness pipeline, humans only proof/reject material findings, and the resulting trusted state powers the risk-planning view.
+
+```mermaid
+flowchart LR
+  raw[Messy facility data] --> agents[Databricks agent workflow]
+  agents --> review[Proof / reject queue]
+  review --> trusted[Trusted resulting state]
+  trusted --> risk[Medical desert risk planner]
+```
+
 This repo is configured for local exploration of this Databricks workspace:
 
 - Workspace ID: `7474647758171864`
@@ -155,13 +167,28 @@ flowchart TB
 
 ### Agent Pipeline
 
-The app includes four scaffolded agents: `DedupAgent`, `GeoAgent`, `ShortageAgent`, and `RiskAgent`. Their specs, state shape, runtime modes, and current persistence gap are documented in `app/lib/agents/SPEC.md`.
+The app includes an ingestion-led skeleton agent workflow. Agent specs, state shape, runtime modes, and current persistence gaps are documented in `app/lib/agents/SPEC.md`.
+
+```mermaid
+flowchart LR
+  ingest[Ingestion Manager] --> qa[QA/Profile Agent]
+  qa --> dedupe[Dedupe Agent]
+  qa --> evidence[Evidence and Specialty Agent]
+  qa --> geo[Geo Agent]
+  dedupe --> review[Human review gate]
+  evidence --> trust[Trust scoring]
+  geo --> trust
+  trust --> risk[Risk Planning Agent]
+  review --> risk
+```
 
 Current status:
 
 - Local in-process pipeline: implemented and clickable through `POST /api/pipeline/start`.
+- Skeleton agents complete without requiring LLM calls when `AGENT_LLM_ENABLED=false`.
 - Databricks multi-task Job: scaffolded by `scripts/setup_dbx_job.py`.
-- Databricks Job deployment: not considered verified until `DATABRICKS_PIPELINE_JOB_ID` exists, deployed `PIPELINE_MODE=databricks`, and all four job tasks complete end to end.
+- Databricks Job deployment: not considered verified until `DATABRICKS_PIPELINE_JOB_ID` exists, deployed `PIPELINE_MODE=databricks`, and all agent tasks complete end to end.
+- Design-session note: `docs/design-session-2026-06-15-agent-architecture.md`.
 
 ### Data Backend
 

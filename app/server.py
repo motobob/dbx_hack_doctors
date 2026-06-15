@@ -401,7 +401,7 @@ async def pipeline_start(payload: PipelineStartPayload | None = None) -> dict[st
         if payload and payload.mode:
             os.environ["PIPELINE_MODE"] = payload.mode
         incoming = payload.incoming_records if payload else None
-        pipeline_id = await asyncio.to_thread(pl.start_pipeline, incoming_records=incoming)
+        pipeline_id = pl.start_pipeline(incoming_records=incoming)
         return {"pipeline_id": pipeline_id, "status": "started"}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to start pipeline: {type(exc).__name__}: {exc}") from exc

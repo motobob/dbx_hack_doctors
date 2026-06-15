@@ -14,6 +14,17 @@ So the right hackathon posture is:
 
 - Primary submission story: "We make the dataset planning-ready."
 - Downstream value story: "Those cleaned, trust-weighted records can drive medical desert gap planning."
+- Demo posture: "No human should clean this manually. Agents find the problems and propose changes; humans proof/reject material decisions; the risk planner emerges from the trusted resulting state."
+
+```mermaid
+flowchart TB
+  track4[Track 4: data readiness] --> pipeline[Agent-led ingestion and cleanup]
+  pipeline --> proof[Human proof / reject]
+  proof --> trusted[Trusted resulting state]
+  trusted --> track2[Track 2: medical desert risk output]
+```
+
+For a three-minute demo, show the full arc quickly: current readiness numbers, import/stage new messy data, run the Databricks agent workflow, review the proof/reject queue, then open the risk planner and show how the cleanup changes planning confidence.
 
 ### 2. The dataset is noisy in predictable ways, so the pipeline should be structured around those failure modes
 

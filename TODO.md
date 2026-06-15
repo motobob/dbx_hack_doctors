@@ -20,6 +20,13 @@ http://127.0.0.1:8000
 
 ## Current State
 
+Top-level product setting:
+
+- We are solving **Track 4: Data Readiness Desk** with **Track 2: Medical Desert Planner** in mind.
+- The demo promise is: agents ingest and clean messy facility data, humans only proof/reject material findings, and the trusted resulting state produces the downstream risk planner.
+- The three-minute story should show current readiness numbers -> import/stage update -> agent workflow -> proof/reject actions -> risk recommendations.
+- MVP confidence is row-level: decide whether a facility row is trusted enough to count in planning. Field-level confidence is a later enhancement for high-value fields only.
+
 Core files:
 - `app/server.py`: FastAPI API + static React server. Includes pipeline endpoints.
 - `app/frontend/src/main.jsx`: React app — three tabs, pipeline status panel with agent cards, ingest mode.
@@ -31,13 +38,18 @@ Core files:
 - `app/lib/llm.py`: Databricks Foundation Models via OpenAI SDK (`/serving-endpoints`).
 - `app/lib/pipeline_state.py`: pipeline state shape, local JSON backend, Workspace API backend.
 - `app/lib/pipeline.py`: pipeline orchestrator — local asyncio mode + Databricks Job mode.
-- `app/lib/agents/`: four agents — DedupAgent (analysis + ingest), GeoAgent, ShortageAgent, RiskAgent.
+- `app/lib/agents/`: eight-agent skeleton — IngestionManager, QAProfile, Dedup, EvidenceSpecialty, Geo, Shortage, HumanReviewGate, Risk.
 - `app/lib/agents/SPEC.md`: agent contracts, state shape, runtime modes, and DBX Job verification checklist.
-- `app/jobs/run_agent.py`: Databricks Job task entrypoint for all four agents.
+- `docs/design-session-2026-06-15-agent-architecture.md`: formatted transcript notes and target ingestion-led architecture.
+- `docs/demo-review-2026-06-15-current-state-import-actions.md`: formatted demo review transcript notes and UX decisions.
+- `app/jobs/run_agent.py`: Databricks Job task entrypoint for all eight agents.
 - `app/sql/unity_catalog_state.sql`: Unity Catalog DDL for source, work, result, audit schemas.
 - `app/state/scratchpad.md`: seed Markdown scratchpad.
 - `app/state/last_run.json`: generated local parse state, gitignored.
 - `scripts/setup_dbx_job.py`: creates/updates the multi-task Databricks pipeline Job.
+- `scripts/create_demo_import.py`: regenerates the small XLSX demo import workbook.
+- `scripts/smoke_local_e2e.py`: local end-to-end smoke test for health/state, demo XLSX import preview, and the eight-agent pipeline.
+- `demo/data_readiness_demo_import.xlsx`: 12-row demo import file that triggers duplicate, sparse-field, weak-claim, and review-gate signals.
 - `run.sh`: dev/deploy helper — `ui | api | dev | deploy [name] | open [name]`.
 - `setup.sh`: teammate onboarding — venv, DBX profile, env setup.
 - `data/raw/.../facilities/facilities.csv.gz`: downloaded facilities table.
@@ -60,7 +72,8 @@ flowchart TB
 Completed/working now:
 
 - [x] FastAPI + React/Vite app skeleton.
-- [x] Three app tabs: `Current Dataset`, `Import + Actions`, `Risk Recommendations`.
+- [x] Current app tabs: `Current State`, `Import + Pipeline`, `Actions`, `Risk Recommendations`.
+- [x] Target tab split from demo review implemented: import/scratchpad/pipeline separated from actions.
 - [x] Local downloaded facilities source loads in local mode.
 - [x] Current Dataset KPI cards and score bars.
 - [x] Markdown scratchpad save and re-parse trigger.
@@ -83,15 +96,25 @@ Completed/working now:
 - [x] `run.sh` — ui / api / dev / deploy [name] / open [name].
 - [x] `setup.sh` — teammate onboarding (venv, DBX CLI, profile, .env).
 - [x] Databricks Apps deploy pipeline (sync + ensure_app state machine).
-- [x] Multi-agent AI pipeline — DedupAgent, GeoAgent, ShortageAgent, RiskAgent.
+- [x] Multi-agent AI pipeline skeleton — IngestionManager, QAProfile, Dedup, EvidenceSpecialty, Geo, Shortage, HumanReviewGate, Risk.
 - [x] Basic agent specs and pipeline state documented in `app/lib/agents/SPEC.md`.
+- [x] Design session saved and linked: `docs/design-session-2026-06-15-agent-architecture.md`.
+- [x] Demo review transcript saved and linked: `docs/demo-review-2026-06-15-current-state-import-actions.md`.
 - [x] Dual pipeline mode: local asyncio (default) + Databricks multi-task Job.
 - [x] DedupAgent ingest mode — compares uploaded records against existing dataset.
 - [x] Pipeline state API: `POST /api/pipeline/start`, `GET /api/pipeline/status[/{id}]`.
 - [x] Pipeline status panel in UI with per-agent cards and 3-second polling.
-- [x] "Run ingestion pipeline" button in Import panel — passes uploaded records to DedupAgent.
+- [x] "Run ingestion pipeline" button in Import panel — passes uploaded records into the eight-agent ingestion workflow.
 - [x] LLM via Databricks Foundation Models (`/serving-endpoints`, OpenAI-compatible).
 - [x] Databricks Job setup script (`scripts/setup_dbx_job.py`).
+- [x] Local revalidation on 2026-06-15: Python compile, Vite build, and local eight-agent pipeline smoke all pass.
+- [x] Demo import XLSX generated from checked-in source data with intentional duplicate/sparse/weak-claim variations.
+- [x] Import-driven pipeline smoke passes with demo XLSX: 12 incoming rows, 4 duplicate decisions, 3 row-quality flags, 30 review items.
+- [x] Local API-style E2E smoke test added and passing: `scripts/smoke_local_e2e.py`.
+- [x] KPI cards on `Current State` are clickable and navigate into filtered `Actions`.
+- [x] Four-tab UI deployed to Databricks Apps on 2026-06-15.
+- [x] Databricks multi-task Job created: `590750946177761`.
+- [ ] Databricks Job validation: latest run failed at `ingestion`; downstream tasks were skipped.
 - [ ] Databricks Job mode deployed and verified end-to-end.
 
 ## Priority Next Actions
@@ -116,7 +139,12 @@ flowchart LR
   - [ ] use the configured SQL warehouse
   - [ ] write `APP_RESULT_CATALOG.work/result/audit`
 - [ ] **P0 deploy smoke:** open deployed `/api/status`, `/api/config`, `/api/state`, and `/api/diagnostics`.
+- [ ] **P0 three-minute demo story:** verify the live app can show current numbers, import/stage, run agents, show proof/reject queue, and show risk recommendations without narration gaps.
+- [x] **P0 tab split:** separate `Import + Pipeline` from `Actions` and keep `Actions` as a dedicated proof/reject work queue.
 - [ ] **P1 pipeline persistence:** persist agent outputs from `app/lib/agents/` into Unity Catalog work/result tables.
+- [x] **P1 target agents:** add skeleton Ingestion Manager, QA/Profile Agent, Evidence/Specialty Agent, and Human Review Gate.
+- [ ] **P1 proof/reject UX:** turn HumanReviewGate output into explicit Accept / Reject / Needs evidence controls.
+- [ ] **P1 action comments:** add required/free-text comment capture for accepted/rejected actions.
 - [ ] **P1 risk UI:** wire RiskAgent output into the `Risk Recommendations` tab instead of mock rows.
 - [ ] **P1 import staging:** add `POST /api/import/stage` and stage uploaded rows into source/work tables.
 - [ ] **P2 UX polish:** split React components, add table pagination, add toasts, and add confidence/status chips.
@@ -137,7 +165,7 @@ flowchart LR
 - [ ] Add a richer selected-action side panel.
 - [ ] Add confidence/status chips instead of raw text.
 - [x] Add a Markdown preview toggle for the scratchpad.
-- [ ] Add "jump to Import + Actions" behavior from Current Dataset drivers.
+- [ ] Add "jump to Actions" behavior from Current State drivers.
 
 ## Phase 2: Durable Local State
 
@@ -155,7 +183,8 @@ flowchart LR
 
 ## Phase 3: Real Profiling
 
-- [ ] Replace mock consistency scoring with real field-level profiling.
+- [ ] Replace mock consistency scoring with real row-level confidence/readiness scoring.
+- [ ] Add field-level confidence only for high-value planning fields after row-level scoring is solid.
 - [ ] Compute completeness by canonical field groups:
   - [ ] identity
   - [ ] location
@@ -273,25 +302,36 @@ The multi-agent AI pipeline is implemented. Agents run locally (asyncio) or via 
 
 Current agents (`app/lib/agents/`):
 
-- [x] **DedupAgent** — analysis mode (cluster dedup) + ingest mode (incoming vs existing)
-- [x] **GeoAgent** — geographic quality + coverage gap detection
-- [x] **ShortageAgent** — care shortage analysis by state/care type
-- [x] **RiskAgent** — synthesizes all upstream outputs into risk matrix + readiness scores
+- [x] **IngestionManagerAgent** — owns uploaded rows, schema alignment, route selection, and column-shift suspicion.
+- [x] **QAProfileAgent** — scans completeness, sparsity, suspicious metadata, and record-level QA tags.
+- [x] **DedupAgent** — analysis mode (cluster dedup) + ingest mode (incoming vs existing).
+- [x] **EvidenceSpecialtyAgent** — extracts capability evidence, normalizes claim strength, and flags weak evidence.
+- [x] **GeoAgent** — geographic quality + coverage gap detection.
+- [x] **ShortageAgent** — care shortage analysis by state/care type.
+- [x] **HumanReviewGateAgent** — escalates ambiguous duplicates, weak evidence, geo flags, and planning-impacting trust changes.
+- [x] **RiskAgent** — synthesizes all upstream outputs into risk matrix + readiness scores.
 
 Remaining agent work:
 
 - [ ] Persist agent outputs to Unity Catalog after pipeline completes:
+  - [ ] IngestionManagerAgent → `source.raw_uploaded_files` / `source.raw_uploaded_rows`
+  - [ ] QAProfileAgent → `work.data_quality_findings`
   - [ ] DedupAgent → `work.facility_duplicate_candidates`
+  - [ ] EvidenceSpecialtyAgent → `work.facility_capability_evidence`
   - [ ] GeoAgent → `work.data_quality_findings` (geo section)
   - [ ] ShortageAgent → `result.geo_risk_recommendations`
+  - [ ] HumanReviewGateAgent → `result.action_recommendations` / `result.reviewer_notes`
   - [ ] RiskAgent → `result.readiness_kpi_snapshot` + `result.action_recommendations`
 - [ ] Wire RiskAgent output into the `Risk Recommendations` tab (currently shows mock data).
+- [ ] Decide whether current DedupAgent ingest mode becomes a tool under `IngestionManagerAgent` or remains a separate agent stage.
+- [ ] Define human-review thresholds for material planning impact.
 - [ ] Add retry for failed pipeline runs.
 - [ ] Add `GET /api/pipeline/history` to list past runs.
 - [ ] Test Databricks Job mode end-to-end (requires `setup_dbx_job.py` run + deploy).
+- [ ] Debug Databricks Job ingestion task failure from run `668291840520725`.
 - [ ] After job setup, update deployed env:
   - [ ] `PIPELINE_MODE=databricks`
-  - [ ] `DATABRICKS_PIPELINE_JOB_ID=<created job id>`
+  - [x] `DATABRICKS_PIPELINE_JOB_ID=590750946177761`
 
 Pipeline setup steps (one-time per workspace):
 
@@ -300,6 +340,18 @@ python scripts/setup_dbx_job.py
 ./run.sh deploy
 # Then set PIPELINE_MODE=databricks in .env to use Databricks Job mode
 ```
+
+Latest validation:
+
+- [x] Python compile passes for `app/server.py`, `app/lib`, `app/jobs`, and `scripts/setup_dbx_job.py`.
+- [x] Frontend production build passes with `npm run build`.
+- [x] Local skeleton pipeline completes all eight agents: `ingestion`, `qa`, `dedup`, `evidence`, `geo`, `shortage`, `review`, `risk`.
+- [x] Local end-to-end smoke passes:
+  ```bash
+  .venv/bin/python scripts/smoke_local_e2e.py
+  ```
+  Expected marker: `LOCAL_E2E_SMOKE_OK`.
+- [ ] Databricks multi-task Job exists but is not validated: run `668291840520725` failed at `ingestion`.
 
 ## Phase 7: AI Evidence Extraction
 

@@ -106,6 +106,38 @@ class DedupAgent(BaseAgent):
 
     def _run_ingest(self, existing_df: pd.DataFrame, incoming: list[dict]) -> dict:
         incoming_df = pd.DataFrame(incoming)
+        if not self.llm_enabled():
+            decisions = []
+            existing_names = set(existing_df.get("name", pd.Series(dtype=str)).fillna("").astype(str).str.lower())
+            for index, row in incoming_df.head(100).fillna("").iterrows():
+                name = str(row.get("name", "")).lower()
+                decision = "duplicate" if name and name in existing_names else "insert"
+                decisions.append(
+                    {
+                        "incoming_index": int(index),
+                        "incoming_name": row.get("name", ""),
+                        "decision": decision,
+                        "confidence": "medium",
+                        "matched_existing_name": row.get("name", "") if decision == "duplicate" else None,
+                        "reason": "Deterministic skeleton match on facility name.",
+                        "fields_to_update": [],
+                    }
+                )
+            summary = {
+                "total_incoming": len(incoming),
+                "insert_count": sum(1 for item in decisions if item["decision"] == "insert"),
+                "update_count": 0,
+                "duplicate_count": sum(1 for item in decisions if item["decision"] == "duplicate"),
+                "review_count": 0,
+            }
+            return {
+                "ingestion_decisions": decisions,
+                "summary": summary,
+                "mode": "ingest",
+                "incoming_count": len(incoming),
+                "existing_count": len(existing_df),
+                "skeleton": True,
+            }
 
         # Sample existing to stay within token budget
         existing_sample = self._sample(existing_df, n=40)
@@ -151,6 +183,31 @@ class DedupAgent(BaseAgent):
                 "clusters": [],
                 "summary": {"total_clusters": 0, "merge_count": 0, "split_count": 0, "review_count": 0},
                 "mode": "dedup",
+            }
+
+        if not self.llm_enabled():
+            clusters = [
+                {
+                    "cluster_id": cluster_id,
+                    "decision": "review",
+                    "confidence": "medium",
+                    "reason": "Deterministic skeleton flagged this duplicate cluster for review.",
+                    "canonical_name": None,
+                }
+                for cluster_id in dup_clusters[:20]
+            ]
+            return {
+                "clusters": clusters,
+                "summary": {
+                    "total_clusters": len(clusters),
+                    "merge_count": 0,
+                    "split_count": 0,
+                    "review_count": len(clusters),
+                },
+                "total_dup_clusters": len(dup_clusters),
+                "evaluated_clusters": len(clusters),
+                "mode": "dedup",
+                "skeleton": True,
             }
 
         sample_clusters = dup_clusters[:20]
