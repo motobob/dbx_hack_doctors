@@ -8,7 +8,7 @@
 
 ## 1. Overview & Architecture
 
-The ingestion agent runs automatically whenever a new batch of facilities data arrives. It enforces data quality through three sequential sub-agents, then surfaces unresolvable conflicts to a human reviewer via the Databricks App.
+The ingestion agent runs automatically whenever a new batch of facilities data arrives. It enforces data quality through four sequential sub-agents, then surfaces conflicts and quality scores to a human reviewer via the Databricks App.
 
 ```
 ingestion_agent  (Orchestrator)
@@ -21,9 +21,15 @@ ingestion_agent  (Orchestrator)
   │     Input:   cleaned_staging_table, "workspace.default.facilities_dedup"
   │     Output:  inserts new records, updates enriched records, flags conflicts
   │
-  └── review_surface_agent  (Sub-Agent C)
-        Input:   flagged rows list from Sub-Agent B
-        Output:  rows written to workspace.default.facilities_review_queue
+  ├── review_surface_agent  (Sub-Agent C)
+  │     Input:   flagged rows list from Sub-Agent B
+  │     Output:  rows written to workspace.default.facilities_review_queue
+  │
+  └── scoring_agent  (Sub-Agent D)
+        Input:   "workspace.default.facilities_dedup" (full table, post-merge)
+        Output:  refreshes workspace.default.facilities_quality_scores view,
+                 writes per-run score summary to facilities_ingestion_log,
+                 surfaces tier-D and name↔specialty failures to Databricks App
 ```
 
 The orchestrator calls each sub-agent in sequence, passing outputs forward. At the end it produces a run summary written to `workspace.default.facilities_ingestion_log`.
@@ -50,7 +56,10 @@ Steps:
 3. Call review_surface_agent with flagged_rows.
    - Receive: queued_count
 
-4. Write run summary to facilities_ingestion_log:
+4. Call scoring_agent with "workspace.default.facilities_dedup".
+   - Receive: score_summary (JSON with tier counts and avg scores)
+
+5. Write run summary to facilities_ingestion_log:
    {
      "run_at": <timestamp>,
      "batch_table": <raw_batch_table>,
@@ -63,16 +72,23 @@ Steps:
      "state_standardized": <int>,
      "inserted": <int>,
      "updated": <int>,
-     "flagged_for_review": <int>
+     "flagged_for_review": <int>,
+     "score_tier_A": <int>,
+     "score_tier_B": <int>,
+     "score_tier_C": <int>,
+     "score_tier_D": <int>,
+     "score_avg": <float>
    }
 
-5. Return the run summary to the caller.
+6. Return the run summary to the caller.
 
 Rules:
 - Never modify the source batch table.
 - Never write directly to facilities_dedup; always go through the sub-agents.
 - If alignment_cleaning_agent errors, abort and log the error — do not continue to dedup.
 - If dedup_agent errors on a row, flag that row rather than skipping it silently.
+- scoring_agent always runs even if no new records were inserted — scores can shift when
+  existing records are updated with enriched field data.
 ```
 
 ---
@@ -444,7 +460,369 @@ TBLPROPERTIES ('delta.enableChangeDataFeed' = 'true');
 
 ---
 
-## 6. Ingestion Log Table Schema
+## 6. Sub-Agent D — Scoring Agent
+
+### Purpose
+
+After every ingestion run, the scoring agent recomputes quality scores for all records in `facilities_dedup` and surfaces actionable findings to the Databricks App. It does not modify facility data — it only writes to the scores view and the review queue.
+
+### Scoring Model
+
+Two dimensions are combined into a single `quality_score` (0–100):
+
+**Completeness Score (0–100)** — weighted field presence:
+
+| Field(s) | Points | Condition |
+|---|---|---|
+| `latitude` + `longitude` | 20 | Both present and within India (lat 8–37, lon 68–98) |
+| `specialties` | 20 | ≥1 distinct value after `ARRAY_DISTINCT` |
+| `address_stateOrRegion` | 10 | Not null |
+| `address_city` | 8 | Not null or empty |
+| `facilityTypeId` | 8 | Not null |
+| `capability` | 6 | Not null |
+| `procedure` | 5 | Not null |
+| `address_zipOrPostcode` | 5 | Valid 6-digit PIN |
+| `phone_numbers` or `officialPhone` | 4 | At least one present and non-empty |
+| `description` | 3 | Present and >20 characters |
+| `email` or `websites` | 1 | At least one present |
+
+**Consistency Score (0–100)** — cross-field checks (NULL = not applicable, treated as 0.5):
+
+| Check | Points | Logic |
+|---|---|---|
+| Coordinates within stated state bounding box | 25 | Hardcoded bounding boxes per state (see SQL below) |
+| Pincode matches state (via pincode directory) | 20 | Puducherry enclave exception applied |
+| Name keywords consistent with specialties | 20 | Dental→dentistry, Eye→ophthalmology, Cardiac→cardiology, etc. |
+| ≥2 distinct specialties (not just familyMedicine) | 10 | Flags catch-all-only records |
+| Phone in valid Indian format | 15 | Starts with 6–9, 10 digits (with optional +91 prefix) |
+| `yearEstablished` ≤ current year | 10 | Where present |
+
+**Combined:** `quality_score = ROUND(0.6 × completeness_score + 0.4 × consistency_score, 1)`
+
+**Quality Tiers:**
+
+| Tier | Score Range | Meaning |
+|---|---|---|
+| A | ≥ 90 | High quality — ready for matching |
+| B | 75–89 | Good — minor gaps; usable with awareness |
+| C | 60–74 | Usable — notable issues; review recommended |
+| D | < 60 | Review needed — multiple failures |
+
+**Baseline scores (initial clean pass, June 2026):**
+
+| Tier | Records | % | Avg Score |
+|---|---|---|---|
+| A | 8,438 | 84.5% | 92.8 |
+| B | 1,500 | 15.0% | 86.4 |
+| C | 44 | 0.4% | 67.0 |
+| D | 6 | 0.1% | 55.1 |
+| **Overall** | **9,988** | | **91.7** |
+
+### System Prompt
+
+```
+You are the scoring agent for the Virtue Foundation facilities dataset.
+You run after every ingestion cycle and have two responsibilities:
+  1. Refresh the quality scores for all records.
+  2. Surface Tier C/D records and name↔specialty failures to the Databricks App
+     review queue so a human can investigate or correct them.
+
+Use run_sql for all queries. Use write_review_queue for records to surface.
+Use write_ingestion_log to record the score summary.
+
+═══════════════════════════════════════════
+STEP 1 — REFRESH THE SCORES VIEW
+═══════════════════════════════════════════
+
+Execute the following SQL to recreate the quality scores view.
+This view is read by the Databricks App to display per-record scores.
+
+CREATE OR REPLACE VIEW workspace.default.facilities_quality_scores AS
+WITH pincode_states AS (
+  SELECT CAST(pincode AS STRING) as pincode_str, MAX(statename) as dir_statename
+  FROM databricks_virtue_foundation_dataset_dais_2026.virtue_foundation_dataset.india_post_pincode_directory
+  GROUP BY pincode
+),
+specialty_distinct AS (
+  SELECT unique_id, ARRAY_DISTINCT(FROM_JSON(specialties, 'ARRAY<STRING>')) AS spec_arr
+  FROM workspace.default.facilities_dedup
+),
+scored AS (
+  SELECT f.unique_id, f.name, f.address_city, f.address_stateOrRegion,
+    f.address_zipOrPostcode, f.latitude, f.longitude, f.facilityTypeId,
+    -- COMPLETENESS
+    CASE WHEN f.latitude IS NOT NULL AND f.longitude IS NOT NULL
+      AND CAST(f.latitude AS DOUBLE) BETWEEN 8 AND 37
+      AND CAST(f.longitude AS DOUBLE) BETWEEN 68 AND 98 THEN 20 ELSE 0 END AS c_coords,
+    CASE WHEN SIZE(sd.spec_arr) >= 1 THEN 20 ELSE 0 END AS c_specialties,
+    CASE WHEN f.address_stateOrRegion IS NOT NULL THEN 10 ELSE 0 END AS c_state,
+    CASE WHEN f.address_city IS NOT NULL AND f.address_city != '' THEN 8 ELSE 0 END AS c_city,
+    CASE WHEN f.facilityTypeId IS NOT NULL THEN 8 ELSE 0 END AS c_facility_type,
+    CASE WHEN f.capability IS NOT NULL THEN 6 ELSE 0 END AS c_capability,
+    CASE WHEN f.procedure IS NOT NULL THEN 5 ELSE 0 END AS c_procedure,
+    CASE WHEN f.address_zipOrPostcode RLIKE '^[0-9]{6}$' THEN 5 ELSE 0 END AS c_zip,
+    CASE WHEN (f.phone_numbers IS NOT NULL AND f.phone_numbers NOT IN ('[]','[""]',''))
+          OR f.officialPhone IS NOT NULL THEN 4 ELSE 0 END AS c_phone,
+    CASE WHEN f.description IS NOT NULL AND LENGTH(f.description) > 20 THEN 3 ELSE 0 END AS c_description,
+    CASE WHEN f.email IS NOT NULL
+          OR (f.websites IS NOT NULL AND f.websites NOT IN ('[]','[""]','')) THEN 1 ELSE 0 END AS c_contact,
+    -- CONSISTENCY: coords within state bounding box
+    CASE
+      WHEN f.latitude IS NULL OR f.address_stateOrRegion IS NULL THEN NULL
+      WHEN f.address_stateOrRegion = 'Maharashtra'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 15.6 AND 22.1
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 72.6 AND 80.9 THEN 1
+      WHEN f.address_stateOrRegion = 'Gujarat'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 20.1 AND 24.7
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 68.2 AND 74.5 THEN 1
+      WHEN f.address_stateOrRegion = 'Uttar Pradesh'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 23.9 AND 30.4
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 77.1 AND 84.6 THEN 1
+      WHEN f.address_stateOrRegion = 'Tamil Nadu'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 8.0 AND 13.6
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 76.2 AND 80.6 THEN 1
+      WHEN f.address_stateOrRegion = 'Karnataka'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 11.6 AND 18.5
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 74.0 AND 78.6 THEN 1
+      WHEN f.address_stateOrRegion = 'Kerala'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 8.2 AND 12.8
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 74.9 AND 77.4 THEN 1
+      WHEN f.address_stateOrRegion = 'West Bengal'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 21.5 AND 27.2
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 85.8 AND 89.9 THEN 1
+      WHEN f.address_stateOrRegion = 'Punjab'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 29.5 AND 32.5
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 73.9 AND 76.9 THEN 1
+      WHEN f.address_stateOrRegion = 'Haryana'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 27.7 AND 30.9
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 74.5 AND 77.6 THEN 1
+      WHEN f.address_stateOrRegion = 'Telangana'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 15.8 AND 19.9
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 77.2 AND 81.3 THEN 1
+      WHEN f.address_stateOrRegion = 'Rajasthan'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 23.0 AND 30.2
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 69.5 AND 78.3 THEN 1
+      WHEN f.address_stateOrRegion IN ('Delhi','Chandigarh')
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 28.4 AND 29.0
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 76.8 AND 77.4 THEN 1
+      WHEN f.address_stateOrRegion = 'Andhra Pradesh'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 12.6 AND 19.9
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 77.0 AND 84.8 THEN 1
+      WHEN f.address_stateOrRegion = 'Madhya Pradesh'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 21.1 AND 26.9
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 74.0 AND 82.8 THEN 1
+      WHEN f.address_stateOrRegion = 'Bihar'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 24.3 AND 27.5
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 83.3 AND 88.3 THEN 1
+      WHEN f.address_stateOrRegion = 'Jharkhand'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 21.9 AND 25.3
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 83.3 AND 87.9 THEN 1
+      WHEN f.address_stateOrRegion = 'Odisha'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 17.8 AND 22.6
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 81.4 AND 87.5 THEN 1
+      WHEN f.address_stateOrRegion = 'Chhattisgarh'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 17.8 AND 24.1
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 80.2 AND 84.4 THEN 1
+      WHEN f.address_stateOrRegion = 'Uttarakhand'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 28.7 AND 31.5
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 77.6 AND 81.1 THEN 1
+      WHEN f.address_stateOrRegion = 'Assam'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 24.1 AND 28.2
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 89.7 AND 96.0 THEN 1
+      WHEN f.address_stateOrRegion = 'Himachal Pradesh'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 30.4 AND 33.2
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 75.6 AND 79.0 THEN 1
+      WHEN f.address_stateOrRegion = 'Jammu and Kashmir'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 32.3 AND 36.9
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 73.8 AND 80.3 THEN 1
+      WHEN f.address_stateOrRegion = 'Goa'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 14.9 AND 15.8
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 73.7 AND 74.4 THEN 1
+      WHEN f.address_stateOrRegion = 'Puducherry'
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 10.7 AND 12.1
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 76.7 AND 80.6 THEN 1
+      WHEN f.address_stateOrRegion IN ('Tripura','Manipur','Meghalaya','Nagaland',
+        'Mizoram','Arunachal Pradesh','Sikkim')
+        AND CAST(f.latitude AS DOUBLE) BETWEEN 8 AND 37
+        AND CAST(f.longitude AS DOUBLE) BETWEEN 68 AND 98 THEN 1
+      WHEN f.address_stateOrRegion IS NOT NULL THEN 0
+      ELSE NULL
+    END AS k_coords_in_state,
+    -- CONSISTENCY: pincode↔state
+    CASE
+      WHEN f.address_zipOrPostcode NOT RLIKE '^[0-9]{6}$' THEN NULL
+      WHEN ps.dir_statename IS NULL OR ps.dir_statename = 'NA' THEN NULL
+      WHEN f.address_stateOrRegion = 'Puducherry' AND ps.dir_statename = 'TAMIL NADU' THEN 1
+      WHEN LOWER(ps.dir_statename) = LOWER(f.address_stateOrRegion) THEN 1
+      ELSE 0
+    END AS k_zip_state,
+    -- CONSISTENCY: name↔specialty
+    CASE
+      WHEN specialties IS NULL THEN 0
+      WHEN LOWER(f.name) RLIKE '(dental|dent |dent$|orthodont|endodont)'
+        AND NOT ARRAY_CONTAINS(sd.spec_arr, 'dentistry') THEN 0
+      WHEN LOWER(f.name) RLIKE '(eye|ophthalm|retina|vision centre|lasik)'
+        AND NOT ARRAY_CONTAINS(sd.spec_arr, 'ophthalmology') THEN 0
+      WHEN LOWER(f.name) RLIKE '(cardiac|cardio|heart)'
+        AND NOT ARRAY_CONTAINS(sd.spec_arr, 'cardiology') THEN 0
+      WHEN LOWER(f.name) RLIKE '(orthopaed|orthoped|bone|joint replacement|spine)'
+        AND NOT ARRAY_CONTAINS(sd.spec_arr, 'orthopedicSurgery') THEN 0
+      WHEN LOWER(f.name) RLIKE '(neuro|brain|nerve)'
+        AND NOT ARRAY_CONTAINS(sd.spec_arr, 'neurology')
+        AND NOT ARRAY_CONTAINS(sd.spec_arr, 'neurosurgery') THEN 0
+      WHEN LOWER(f.name) RLIKE '(cancer|oncolog)'
+        AND NOT ARRAY_CONTAINS(sd.spec_arr, 'medicalOncology')
+        AND NOT ARRAY_CONTAINS(sd.spec_arr, 'surgicalOncology')
+        AND NOT ARRAY_CONTAINS(sd.spec_arr, 'radiationOncology') THEN 0
+      WHEN LOWER(f.name) RLIKE '(skin|dermat|cosmetic)'
+        AND NOT ARRAY_CONTAINS(sd.spec_arr, 'dermatology') THEN 0
+      WHEN LOWER(f.name) RLIKE '(child|paed|pedia|infant|neonat)'
+        AND NOT ARRAY_CONTAINS(sd.spec_arr, 'pediatrics')
+        AND NOT ARRAY_CONTAINS(sd.spec_arr, 'neonatologyPerinatalMedicine') THEN 0
+      ELSE 1
+    END AS k_name_specialty,
+    -- CONSISTENCY: meaningful specialties
+    CASE
+      WHEN SIZE(sd.spec_arr) >= 2
+        AND NOT (SIZE(sd.spec_arr) = 1 AND ARRAY_CONTAINS(sd.spec_arr, 'familyMedicine'))
+        THEN 1 ELSE 0
+    END AS k_meaningful_specialty,
+    -- CONSISTENCY: phone format
+    CASE
+      WHEN f.phone_numbers IS NULL AND f.officialPhone IS NULL THEN 0
+      WHEN f.officialPhone RLIKE '(\\+91[\\s-]?)?[6-9][0-9]{9}' THEN 1
+      WHEN f.phone_numbers RLIKE '[6-9][0-9]{9}' THEN 1
+      ELSE 0
+    END AS k_phone_format,
+    -- CONSISTENCY: year sanity
+    CASE
+      WHEN f.yearEstablished IS NULL THEN NULL
+      WHEN TRY_CAST(f.yearEstablished AS INT) BETWEEN 1800 AND YEAR(CURRENT_DATE()) THEN 1
+      ELSE 0
+    END AS k_year_valid
+  FROM workspace.default.facilities_dedup f
+  JOIN specialty_distinct sd ON f.unique_id = sd.unique_id
+  LEFT JOIN pincode_states ps ON f.address_zipOrPostcode = ps.pincode_str
+)
+SELECT
+  unique_id, name, address_city, address_stateOrRegion,
+  address_zipOrPostcode, latitude, longitude, facilityTypeId,
+  (c_coords + c_specialties + c_state + c_city + c_facility_type +
+   c_capability + c_procedure + c_zip + c_phone + c_description + c_contact) AS completeness_score,
+  c_coords, c_specialties, c_state, c_city, c_facility_type,
+  c_capability, c_procedure, c_zip, c_phone, c_description, c_contact,
+  ROUND((COALESCE(k_coords_in_state,0.5)*25 + COALESCE(k_zip_state,0.5)*20 +
+         COALESCE(k_name_specialty,0.5)*20 + COALESCE(k_meaningful_specialty,0)*10 +
+         COALESCE(k_phone_format,0.5)*15 + COALESCE(k_year_valid,0.5)*10), 1) AS consistency_score,
+  k_coords_in_state, k_zip_state, k_name_specialty,
+  k_meaningful_specialty, k_phone_format, k_year_valid,
+  ROUND(0.6*(c_coords+c_specialties+c_state+c_city+c_facility_type+c_capability+
+             c_procedure+c_zip+c_phone+c_description+c_contact)
+      + 0.4*(COALESCE(k_coords_in_state,0.5)*25+COALESCE(k_zip_state,0.5)*20+
+             COALESCE(k_name_specialty,0.5)*20+COALESCE(k_meaningful_specialty,0)*10+
+             COALESCE(k_phone_format,0.5)*15+COALESCE(k_year_valid,0.5)*10), 1) AS quality_score,
+  CASE
+    WHEN ROUND(0.6*(c_coords+c_specialties+c_state+c_city+c_facility_type+c_capability+
+                    c_procedure+c_zip+c_phone+c_description+c_contact)
+             + 0.4*(COALESCE(k_coords_in_state,0.5)*25+COALESCE(k_zip_state,0.5)*20+
+                    COALESCE(k_name_specialty,0.5)*20+COALESCE(k_meaningful_specialty,0)*10+
+                    COALESCE(k_phone_format,0.5)*15+COALESCE(k_year_valid,0.5)*10),1) >= 90 THEN 'A'
+    WHEN ROUND(0.6*(c_coords+c_specialties+c_state+c_city+c_facility_type+c_capability+
+                    c_procedure+c_zip+c_phone+c_description+c_contact)
+             + 0.4*(COALESCE(k_coords_in_state,0.5)*25+COALESCE(k_zip_state,0.5)*20+
+                    COALESCE(k_name_specialty,0.5)*20+COALESCE(k_meaningful_specialty,0)*10+
+                    COALESCE(k_phone_format,0.5)*15+COALESCE(k_year_valid,0.5)*10),1) >= 75 THEN 'B'
+    WHEN ROUND(0.6*(c_coords+c_specialties+c_state+c_city+c_facility_type+c_capability+
+                    c_procedure+c_zip+c_phone+c_description+c_contact)
+             + 0.4*(COALESCE(k_coords_in_state,0.5)*25+COALESCE(k_zip_state,0.5)*20+
+                    COALESCE(k_name_specialty,0.5)*20+COALESCE(k_meaningful_specialty,0)*10+
+                    COALESCE(k_phone_format,0.5)*15+COALESCE(k_year_valid,0.5)*10),1) >= 60 THEN 'C'
+    ELSE 'D'
+  END AS quality_tier
+FROM scored;
+
+═══════════════════════════════════════════
+STEP 2 — COMPUTE SCORE SUMMARY
+═══════════════════════════════════════════
+
+Run this query and capture the result as score_summary:
+
+SELECT
+  COUNT(*) as total,
+  SUM(CASE WHEN quality_tier = 'A' THEN 1 ELSE 0 END) as tier_A,
+  SUM(CASE WHEN quality_tier = 'B' THEN 1 ELSE 0 END) as tier_B,
+  SUM(CASE WHEN quality_tier = 'C' THEN 1 ELSE 0 END) as tier_C,
+  SUM(CASE WHEN quality_tier = 'D' THEN 1 ELSE 0 END) as tier_D,
+  ROUND(AVG(quality_score), 1) as avg_score,
+  ROUND(AVG(completeness_score), 1) as avg_completeness,
+  ROUND(AVG(consistency_score), 1) as avg_consistency,
+  ROUND(AVG(CASE WHEN k_name_specialty = 0 THEN 1.0 ELSE 0.0 END) * 100, 1) as pct_name_spec_fail,
+  ROUND(AVG(CASE WHEN k_zip_state = 0 THEN 1.0 ELSE 0.0 END) * 100, 1) as pct_zip_state_fail,
+  ROUND(AVG(CASE WHEN k_coords_in_state = 0 THEN 1.0 ELSE 0.0 END) * 100, 1) as pct_coord_state_fail,
+  ROUND(AVG(CASE WHEN k_meaningful_specialty = 0 THEN 1.0 ELSE 0.0 END) * 100, 1) as pct_weak_specialty
+FROM workspace.default.facilities_quality_scores;
+
+═══════════════════════════════════════════
+STEP 3 — SURFACE TIER C AND D RECORDS TO REVIEW QUEUE
+═══════════════════════════════════════════
+
+For every record with quality_tier IN ('C', 'D') that does NOT already have
+a pending entry in facilities_review_queue with conflict_type = 'quality_score':
+
+Call write_review_queue with:
+  conflict_type:    'quality_score'
+  unique_id:        the record's unique_id
+  name:             the record's name
+  existing_json:    JSON of the record from facilities_dedup
+  incoming_json:    NULL  (not an ingestion conflict — this is a quality flag)
+  diff_summary:     Build dynamically from failing checks. Example:
+                    "Quality score: 55.1/100 (Tier D).
+                     Failures: name contains 'Dental' but dentistry not in specialty list;
+                     only familyMedicine as sole specialty."
+  suggested_action: "(A) Add missing specialty tags to match facility name.
+                     (B) Correct address_stateOrRegion or address_zipOrPostcode
+                         if zip↔state mismatch is flagged.
+                     (C) Dismiss — data is correct as-is (suppresses future alerts)."
+  contact_hint:     source_urls or phone_numbers from the record, if present
+
+═══════════════════════════════════════════
+STEP 4 — SURFACE NAME↔SPECIALTY FAILURES IN TIER B
+═══════════════════════════════════════════
+
+For every record with quality_tier = 'B' AND k_name_specialty = 0 that does NOT
+already have a pending 'quality_score' entry in facilities_review_queue:
+
+Call write_review_queue with the same structure, but:
+  diff_summary: "Quality score: [score]/100 (Tier B — name↔specialty mismatch).
+                 Name implies [inferred specialty] but it is absent from specialty list."
+  suggested_action: "(A) Add the missing specialty tag.
+                     (B) Facility name is misleading — dismiss this alert."
+
+═══════════════════════════════════════════
+STEP 5 — RETURN SCORE SUMMARY
+═══════════════════════════════════════════
+
+Return score_summary JSON to the orchestrator.
+```
+
+### What the Databricks App Displays
+
+The App reads two sources for the scoring dashboard:
+
+**1. `facilities_quality_scores` view** — per-record scores, filterable by tier, state, or failing check:
+- Quality overview dashboard: tier distribution, average score by state, trend vs prior run
+- Drill-down: "Show all Tier B facilities in Maharashtra with name↔specialty failures"
+- Per-record score card shown alongside the facility detail view
+
+**2. `facilities_review_queue`** (conflict_type = 'quality_score') — quality flags appear in the same queue as dedup conflicts. The reviewer sees:
+- Score and tier with plain-English explanation of which checks failed
+- Suggested corrections as A/B/C choices
+- Contact hint to verify with the facility directly
+- Status changes (pending → resolved/dismissed) suppress the same flag on future runs
+
+---
+
+## 8. Ingestion Log Table Schema
 
 ```sql
 CREATE TABLE IF NOT EXISTS workspace.default.facilities_ingestion_log (
@@ -462,7 +840,7 @@ USING DELTA;
 
 ---
 
-## 7. Tool Definitions
+## 9. Tool Definitions
 
 All three sub-agents have access to the following tools. Implement each as a Python function registered with MLflow / Mosaic AI.
 
@@ -504,7 +882,7 @@ def write_ingestion_log(rows: list) -> dict:
 
 ---
 
-## 8. Worked Examples from Prior Session
+## 10. Worked Examples from Prior Session
 
 These are real cases encountered during the initial cleaning pass on the 10,088-row source dataset. Use these as ground truth for validating agent behavior.
 
@@ -767,7 +1145,107 @@ specialties (after ARRAY_DISTINCT): '["internalMedicine","cardiology"]'
 
 ---
 
-## 9. Matching Guidance for Downstream Consumers
+---
+
+### Example 9 — Scoring Agent: Tier D flag surfaced to review queue
+
+**Situation:** After ingestion, the scoring agent detects a dental clinic whose name implies dentistry but whose specialty list only contains `familyMedicine`.
+
+```
+Record: name = "Vasundhara Dental Clinic & Orthodontic Centre"
+        address_stateOrRegion = "Delhi"
+        address_zipOrPostcode = "201012"
+        specialties = '["familyMedicine"]'
+        quality_score = 55.4  →  Tier D
+
+Failing checks:
+  k_name_specialty = 0
+    → name RLIKE '(dental|orthodont)' is TRUE
+    → ARRAY_CONTAINS(spec_arr, 'dentistry') is FALSE
+    → mismatch detected
+  k_meaningful_specialty = 0
+    → only 1 distinct specialty (familyMedicine)
+  k_zip_state = 0
+    → zip 201012 is in Ghaziabad, Uttar Pradesh per pincode directory
+    → stated state is Delhi  →  mismatch
+
+write_review_queue called with:
+  conflict_type:    'quality_score'
+  name:             "Vasundhara Dental Clinic & Orthodontic Centre"
+  diff_summary:     "Quality score: 55.4/100 (Tier D).
+                     Failures:
+                     (1) Name contains 'Dental' and 'Orthodontic' but specialty
+                         list does not include dentistry or orthodontics —
+                         only familyMedicine is tagged.
+                     (2) ZIP 201012 belongs to Ghaziabad, Uttar Pradesh per
+                         India Post directory but address_stateOrRegion = Delhi."
+  suggested_action: "(A) Add dentistry and orthodontics to specialty list;
+                         correct state to Uttar Pradesh if facility is in Ghaziabad.
+                     (B) Dismiss — data is correct as-is."
+  contact_hint:     [phone_numbers or source_urls from record]
+```
+
+---
+
+### Example 10 — Scoring Agent: Tier B name↔specialty flag
+
+**Situation:** A cardiac hospital scores 86.2 (Tier B) because cardiology is absent from its specialty list despite appearing in the facility name.
+
+```
+Record: name = "Fortis Cardiac and Multispeciality Hospital"
+        specialties (after ARRAY_DISTINCT) = ["internalMedicine","generalSurgery",
+                                               "orthopedicSurgery","familyMedicine"]
+        quality_score = 86.2  →  Tier B
+
+Failing check:
+  k_name_specialty = 0
+    → name RLIKE '(cardiac|cardio|heart)' is TRUE
+    → ARRAY_CONTAINS(spec_arr, 'cardiology') is FALSE
+
+write_review_queue called with:
+  conflict_type:    'quality_score'
+  diff_summary:     "Quality score: 86.2/100 (Tier B — name↔specialty mismatch only).
+                     Name contains 'Cardiac' but cardiology is not in the specialty list.
+                     Current specialties: internalMedicine, generalSurgery,
+                     orthopedicSurgery, familyMedicine."
+  suggested_action: "(A) Add cardiology to the specialty list — this is likely
+                         a tagging omission by the scraper.
+                     (B) Dismiss — the facility no longer offers cardiac services."
+  contact_hint:     [source_urls or phone_numbers]
+```
+
+---
+
+### Example 11 — Scoring Agent: run summary logged
+
+**Situation:** After a batch of 150 new records was ingested, the scoring agent re-scores the full table and appends a summary to the ingestion log.
+
+```
+score_summary returned to orchestrator:
+{
+  "total": 10138,
+  "tier_A": 8571,       -- up from 8438 (new records skewed high quality)
+  "tier_B": 1516,
+  "tier_C": 45,
+  "tier_D": 6,
+  "avg_score": 91.8,    -- up 0.1 from baseline 91.7
+  "avg_completeness": 89.9,
+  "avg_consistency": 95.1,
+  "pct_name_spec_fail": 9.1,
+  "pct_zip_state_fail": 1.5,
+  "pct_coord_state_fail": 1.2,
+  "pct_weak_specialty": 2.5
+}
+
+Orchestrator writes to facilities_ingestion_log:
+  action: "score_run_complete"
+  detail: "avg_score=91.8 tier_A=8571 tier_B=1516 tier_C=45 tier_D=6
+           new_quality_flags_queued=3"
+```
+
+---
+
+## 11. Matching Guidance for Downstream Consumers
 
 When querying `facilities_dedup` to match a patient to a hospital:
 
