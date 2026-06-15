@@ -118,6 +118,51 @@ http://127.0.0.1:8000
 
 The Databricks App command is defined in `app/app.yaml`.
 
+### Solution Architecture
+
+```mermaid
+flowchart LR
+  user[Planner or analyst] --> app[Databricks App]
+  app --> ui[React and Vite UI]
+  app --> api[FastAPI backend]
+  api --> cache[In-memory hot state cache]
+  api --> source[(Source facilities table)]
+  api --> result[(App result tables)]
+  api --> pipe[Agent pipeline]
+  pipe --> dedup[DedupAgent]
+  pipe --> geo[GeoAgent]
+  pipe --> shortage[ShortageAgent]
+  dedup --> risk[RiskAgent]
+  geo --> risk
+  shortage --> risk
+  risk --> result
+  result --> ui
+```
+
+```mermaid
+flowchart TB
+  source[Immutable source state] --> snapshot[Source snapshot]
+  scratch[Markdown scratchpad] --> run[Re-parse or pipeline run]
+  snapshot --> run
+  run --> state[Result state version]
+  state --> actions[Action recommendations]
+  state --> risks[Risk recommendations]
+  actions --> decisions[Human or AI decisions]
+  risks --> notes[Planning notes]
+  decisions --> next[Next result state version]
+  notes --> next
+```
+
+### Agent Pipeline
+
+The app includes four scaffolded agents: `DedupAgent`, `GeoAgent`, `ShortageAgent`, and `RiskAgent`. Their specs, state shape, runtime modes, and current persistence gap are documented in `app/lib/agents/SPEC.md`.
+
+Current status:
+
+- Local in-process pipeline: implemented and clickable through `POST /api/pipeline/start`.
+- Databricks multi-task Job: scaffolded by `scripts/setup_dbx_job.py`.
+- Databricks Job deployment: not considered verified until `DATABRICKS_PIPELINE_JOB_ID` exists, deployed `PIPELINE_MODE=databricks`, and all four job tasks complete end to end.
+
 ### Data Backend
 
 The app separates the source dataset from the mutable app/result state:

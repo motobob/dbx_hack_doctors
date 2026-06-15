@@ -32,6 +32,7 @@ Core files:
 - `app/lib/pipeline_state.py`: pipeline state shape, local JSON backend, Workspace API backend.
 - `app/lib/pipeline.py`: pipeline orchestrator — local asyncio mode + Databricks Job mode.
 - `app/lib/agents/`: four agents — DedupAgent (analysis + ingest), GeoAgent, ShortageAgent, RiskAgent.
+- `app/lib/agents/SPEC.md`: agent contracts, state shape, runtime modes, and DBX Job verification checklist.
 - `app/jobs/run_agent.py`: Databricks Job task entrypoint for all four agents.
 - `app/sql/unity_catalog_state.sql`: Unity Catalog DDL for source, work, result, audit schemas.
 - `app/state/scratchpad.md`: seed Markdown scratchpad.
@@ -40,6 +41,21 @@ Core files:
 - `run.sh`: dev/deploy helper — `ui | api | dev | deploy [name] | open [name]`.
 - `setup.sh`: teammate onboarding — venv, DBX profile, env setup.
 - `data/raw/.../facilities/facilities.csv.gz`: downloaded facilities table.
+
+```mermaid
+flowchart TB
+  server[app/server.py] --> frontend[app/frontend]
+  server --> store[app/lib/store.py]
+  server --> reparser[app/lib/reparser.py]
+  server --> pipeline[app/lib/pipeline.py]
+  pipeline --> agents[app/lib/agents]
+  agents --> llm[app/lib/llm.py]
+  pipeline --> state[app/lib/pipeline_state.py]
+  jobs[app/jobs/run_agent.py] --> agents
+  setup[scripts/setup_dbx_job.py] --> jobs
+  ddl[app/sql/unity_catalog_state.sql] --> uc[Unity Catalog]
+  store --> uc
+```
 
 Completed/working now:
 
@@ -68,6 +84,7 @@ Completed/working now:
 - [x] `setup.sh` — teammate onboarding (venv, DBX CLI, profile, .env).
 - [x] Databricks Apps deploy pipeline (sync + ensure_app state machine).
 - [x] Multi-agent AI pipeline — DedupAgent, GeoAgent, ShortageAgent, RiskAgent.
+- [x] Basic agent specs and pipeline state documented in `app/lib/agents/SPEC.md`.
 - [x] Dual pipeline mode: local asyncio (default) + Databricks multi-task Job.
 - [x] DedupAgent ingest mode — compares uploaded records against existing dataset.
 - [x] Pipeline state API: `POST /api/pipeline/start`, `GET /api/pipeline/status[/{id}]`.
@@ -75,10 +92,22 @@ Completed/working now:
 - [x] "Run ingestion pipeline" button in Import panel — passes uploaded records to DedupAgent.
 - [x] LLM via Databricks Foundation Models (`/serving-endpoints`, OpenAI-compatible).
 - [x] Databricks Job setup script (`scripts/setup_dbx_job.py`).
+- [ ] Databricks Job mode deployed and verified end-to-end.
 
 ## Priority Next Actions
 
 Do these first for a clean demo and a handoff-friendly build:
+
+```mermaid
+flowchart LR
+  access[P0 app sharing] --> uc[P0 UC setup]
+  uc --> perms[P0 DBX permissions]
+  perms --> smoke[P0 deploy smoke]
+  smoke --> persist[P1 pipeline persistence]
+  persist --> risk[P1 RiskAgent UI]
+  risk --> importStage[P1 import staging]
+  importStage --> polish[P2 UX polish]
+```
 
 - [ ] **P0 Demo access:** set Databricks App sharing to `Anyone in my organization can use`.
 - [ ] **P0 UC setup:** review and execute `app/sql/unity_catalog_state.sql`, or choose an existing writable catalog fallback.
@@ -260,6 +289,9 @@ Remaining agent work:
 - [ ] Add retry for failed pipeline runs.
 - [ ] Add `GET /api/pipeline/history` to list past runs.
 - [ ] Test Databricks Job mode end-to-end (requires `setup_dbx_job.py` run + deploy).
+- [ ] After job setup, update deployed env:
+  - [ ] `PIPELINE_MODE=databricks`
+  - [ ] `DATABRICKS_PIPELINE_JOB_ID=<created job id>`
 
 Pipeline setup steps (one-time per workspace):
 

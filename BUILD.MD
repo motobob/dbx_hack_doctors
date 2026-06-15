@@ -564,6 +564,52 @@ This lets the app communicate uncertainty honestly and lets planners inspect why
 
 ## Data Architecture
 
+### Overall System Diagram
+
+```mermaid
+flowchart LR
+  subgraph DBX[Databricks Workspace]
+    app[Databricks App]
+    sp[App service principal]
+    wh[SQL warehouse]
+    jobs[Databricks Job]
+    fm[Foundation Model endpoint]
+  end
+
+  subgraph APP[App Runtime]
+    ui[React Vite frontend]
+    api[FastAPI API]
+    cache[Hot in-memory state cache]
+    pipeline[Pipeline orchestrator]
+  end
+
+  subgraph UC[Unity Catalog]
+    source[(source raw snapshots)]
+    work[(work normalized findings)]
+    result[(result recommendations risks)]
+    audit[(audit events)]
+  end
+
+  user[Planner or reviewer] --> app
+  app --> ui
+  ui --> api
+  api --> cache
+  api --> wh
+  wh --> source
+  wh --> work
+  wh --> result
+  api --> pipeline
+  pipeline --> jobs
+  pipeline --> fm
+  jobs --> work
+  jobs --> result
+  api --> audit
+  sp --> source
+  sp --> work
+  sp --> result
+  sp --> audit
+```
+
 ### Source State vs Resulting State
 
 The app has two different data states and they must not be mixed:
@@ -582,13 +628,23 @@ The app has two different data states and they must not be mixed:
 
 Workflow:
 
-```text
-source snapshot + scratchpad version
-  -> re-parse run
-  -> resulting state version
-  -> recommendations/actions/risks
-  -> human/AI decisions
-  -> next resulting state version
+```mermaid
+flowchart TB
+  marketplace[Marketplace facilities table] --> snapshot[source snapshot]
+  upload[Uploaded CSV or XLSX] --> staged[staged raw upload]
+  staged --> snapshot
+  scratch[Scratchpad version] --> run[parse or pipeline run]
+  snapshot --> run
+  run --> normalized[work normalized records]
+  run --> findings[work quality findings]
+  normalized --> state[result state version]
+  findings --> state
+  state --> actions[action recommendations]
+  state --> risks[geo risk recommendations]
+  actions --> decisions[action decisions]
+  risks --> planning[planning notes]
+  decisions --> next[next result state version]
+  planning --> next
 ```
 
 Basic version-control rules:
@@ -615,6 +671,16 @@ Recommended schemas:
 - `work`: parsed/normalized/intermediate outputs.
 - `result`: versioned app state, recommendations, risks, decisions, and notes.
 - `audit`: run logs and user/AI event history.
+
+```mermaid
+flowchart LR
+  raw[Marketplace and uploads] --> source[source schema]
+  source --> work[work schema]
+  work --> result[result schema]
+  result --> app[App UI and API]
+  app --> audit[audit schema]
+  app --> result
+```
 
 Naming pattern:
 
@@ -680,12 +746,28 @@ Append-only operational history.
 
 The app supports a multi-agent AI re-parse pipeline triggered by `POST /api/pipeline/start`. It runs in two modes controlled by `PIPELINE_MODE`:
 
+```mermaid
+flowchart LR
+  start[POST /api/pipeline/start] --> dedup[DedupAgent]
+  dedup --> geo[GeoAgent]
+  dedup --> shortage[ShortageAgent]
+  geo --> risk[RiskAgent]
+  shortage --> risk
+  risk --> outputs[Readiness score actions risks]
+  outputs --> ui[Pipeline status panel and tabs]
+  outputs --> uc[(Unity Catalog result tables)]
+```
+
 ### Local mode (default, `PIPELINE_MODE=local`)
 
 Runs inside the FastAPI process using `asyncio`:
 
-```
-dedup  →  geo + shortage (parallel)  →  risk
+```mermaid
+flowchart LR
+  dedup[dedup] --> geo[geo]
+  dedup --> shortage[shortage]
+  geo --> risk[risk]
+  shortage --> risk
 ```
 
 State is written to `app/state/pipeline_{id}.json` and symlinked via `pipeline_current.json`. The frontend polls `GET /api/pipeline/status/{id}` every 3 seconds during execution.
@@ -700,6 +782,24 @@ Triggers a multi-task Databricks Job:
 - Task 4: `risk` (depends on geo + shortage)
 
 Each task runs `jobs/run_agent.py <agent_name>` and shares state via the Databricks Workspace API. The FastAPI app polls the job run and mirrors task states into the pipeline state JSON.
+
+```mermaid
+sequenceDiagram
+  participant UI as React UI
+  participant API as FastAPI
+  participant JOB as Databricks Job
+  participant WS as Workspace state
+  participant UC as Unity Catalog
+
+  UI->>API: POST /api/pipeline/start
+  API->>JOB: submit multi-task run
+  JOB->>WS: write pipeline state
+  UI->>API: poll /api/pipeline/status
+  API->>WS: read current state
+  WS-->>API: agent statuses and results
+  API-->>UI: pipeline state
+  JOB->>UC: persist work/result outputs
+```
 
 Setup: `python scripts/setup_dbx_job.py` — creates the job and writes `DATABRICKS_PIPELINE_JOB_ID` to `.env`.
 
@@ -725,6 +825,14 @@ In ingest mode, the agent returns per-record decisions:
 - **GeoAgent**: flagged records, coverage gaps, geographic summary
 - **ShortageAgent**: shortage areas by state/care type, severity levels
 - **RiskAgent**: risk matrix, executive summary, `data_readiness_score`, `planning_readiness_score`
+
+Detailed agent contracts and pipeline state are maintained in `app/lib/agents/SPEC.md`.
+
+Current deploy status:
+
+- Local agent mode is implemented.
+- Databricks Job mode is scaffolded with `scripts/setup_dbx_job.py`.
+- Databricks Job mode is **not verified deployed** until `DATABRICKS_PIPELINE_JOB_ID` is created, app env is updated to `PIPELINE_MODE=databricks`, and an end-to-end run completes.
 
 ### LLM backend
 

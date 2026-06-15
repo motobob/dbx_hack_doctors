@@ -49,7 +49,7 @@ def task(
         depends_on=[TaskDependency(task_key=d) for d in (depends_on or [])],
         spark_python_task=SparkPythonTask(
             python_file=f"{WORKSPACE_PATH}/jobs/run_agent.py",
-            parameters=[key],
+            parameters=[key, "{{job.parameters.pipeline_id}}"],
         ),
         environment_key="pipeline_env",
     )
