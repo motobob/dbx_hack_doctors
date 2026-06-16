@@ -28,6 +28,7 @@ usage() {
   echo "  ui                Run frontend dev server (Vite, port 5173 or next free port)"
   echo "  api               Run API server (uvicorn, port 8000 or next free port, --reload)"
   echo "  dev               Run both UI and API locally in parallel"
+  echo "  dev local         Run UI + API in offline mode: checked-in CSV, local state, local agents"
   echo "  deploy [name]     Build + push to Databricks Apps"
   echo "                    Omit [name] → use DATABRICKS_APP_NAME from .env"
   echo "                    Pass [name] → deploy a separate named copy"
@@ -172,6 +173,7 @@ run_api() {
 }
 
 run_dev() {
+  local mode="${1:-}"
   local ui_port="${UI_PORT:-${APP_UI_PORT:-}}"
   if [ -z "$ui_port" ]; then
     ui_port="$(free_port 5173)"
@@ -181,13 +183,39 @@ run_dev() {
     api_port="$(free_port 8000)"
   fi
   local api_target="http://127.0.0.1:$api_port"
+
+  local -a api_env=()
+  local mode_label="default env"
+  if [ "$mode" = "local" ]; then
+    mode_label="local/offline"
+    api_env=(
+      APP_DATA_MODE=local
+      APP_SOURCE_MODE=checked_in
+      APP_STATE_MODE=local
+      APP_STATE_FALLBACK_ON_ERROR=true
+      APP_STATE_CACHE_PREWARM=false
+      PIPELINE_MODE=local
+      AGENT_LLM_ENABLED=false
+      APP_BASIC_AUTH_ENABLED=false
+    )
+  elif [ -n "$mode" ]; then
+    echo "ERROR: unknown dev mode '$mode'"
+    echo "  Try: ./run.sh dev local"
+    exit 1
+  fi
+
   echo ">>> Starting UI + API (Ctrl-C stops both)..."
+  echo ">>> Mode: $mode_label"
   echo ">>> UI:  http://127.0.0.1:$ui_port"
   echo ">>> API: $api_target"
   echo ">>> Vite /api proxy: $api_target"
+  if [ "$mode" = "local" ]; then
+    echo ">>> Local source/state: checked-in facilities CSV + app/state files"
+    echo ">>> Pipeline: in-process local agents, LLM disabled"
+  fi
   trap 'kill 0' INT TERM EXIT
   (cd "$FRONTEND_DIR" && npm install --silent && VITE_API_TARGET="$api_target" npm run dev -- --host 127.0.0.1 --port "$ui_port") &
-  (cd "$APP_DIR" && "$PYTHON" -m uvicorn server:app --host 0.0.0.0 --port "$api_port" --reload) &
+  (cd "$APP_DIR" && env "${api_env[@]}" "$PYTHON" -m uvicorn server:app --host 0.0.0.0 --port "$api_port" --reload) &
   wait
 }
 
@@ -256,7 +284,7 @@ CMD="${1:-}"
 case "$CMD" in
   ui)     run_ui ;;
   api)    run_api ;;
-  dev)    run_dev ;;
+  dev)    run_dev "${2:-}" ;;
   deploy) run_deploy "${2:-}" ;;
   open)   run_open "${2:-}" ;;
   *)      usage ;;

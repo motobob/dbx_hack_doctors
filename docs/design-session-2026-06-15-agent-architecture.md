@@ -111,17 +111,21 @@ The team discussed moving from a flat list of agents to an ingestion-led workflo
 
 ```mermaid
 flowchart LR
-  ingest[Ingestion Manager] --> qa[QA/Profile Agent]
-  qa --> dedupe[Dedupe Agent]
-  qa --> evidence[Evidence and Specialty Agent]
-  qa --> geo[Geo Agent]
-  dedupe --> decision[Insert Update Duplicate Review]
-  evidence --> trust[Trust Scoring]
-  geo --> trust
-  decision --> human{Human review needed?}
-  trust --> human
+  start[POST /api/pipeline/start] --> ingest[1 Ingestion Manager]
+  ingest --> qa[2 QA/Profile Agent]
+  qa --> pin[3 PIN Directory Agent]
+  qa --> nfhs[4 NFHS Survey Agent]
+  qa --> dedupe[5 Dedupe Agent]
+  qa --> evidence[6 Evidence and Specialty Agent]
+  qa --> geo[7 Geo Agent]
+  pin --> geo
+  dedupe --> shortage[8 Shortage Agent]
+  evidence --> shortage
+  geo --> shortage
+  nfhs --> shortage
+  shortage --> human[9 Human Review Gate]
   human --> result[Result state version]
-  result --> risk[Risk/Planning Agent]
+  result --> risk[10 Risk/Planning Agent]
 ```
 
 ## Proposed Agent Roles
@@ -224,10 +228,12 @@ Keep mostly internal:
 
 ## Decisions Since This Session
 
-- The current skeleton exposes eight runnable stages: `ingestion`, `qa`, `dedup`, `evidence`, `geo`, `shortage`, `review`, and `risk`.
+- The current skeleton exposes ten runnable stages: `ingestion`, `qa`, `pincode`, `nfhs`, `dedup`, `evidence`, `geo`, `shortage`, `review`, and `risk`.
 - `QA/Profile Agent` is a separate runnable stage so its findings can be shown and persisted independently.
+- `PIN Directory Agent` and `NFHS Survey Agent` are separate runnable stages because postal enrichment and district survey context have their own grain, caveats, and review queues.
 - `Evidence and Specialty Agent` is part of the current skeleton because claim evidence is central to honest planning risk.
 - Risk recommendations are conceptually downstream of the resulting state, not raw source rows.
+- Verification on 2026-06-16 found the Databricks App object exists, but app compute was stopped and new Databricks Job runs were temporarily disabled for workspace/account `7474647758171864`. Treat Databricks Job mode as scaffolded but not healthy until a fresh smoke run completes all ten tasks.
 
 ## Open Clarification Questions
 

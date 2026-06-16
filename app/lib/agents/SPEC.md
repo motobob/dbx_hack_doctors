@@ -335,6 +335,14 @@ The job definition is scaffolded by `scripts/setup_dbx_job.py`, but Databricks J
 
 Until then, deployed apps should keep `PIPELINE_MODE=local` so the pipeline remains clickable.
 
+Latest verification, 2026-06-16:
+
+- Expected runnable agent/task count: 10 (`ingestion`, `qa`, `pincode`, `nfhs`, `dedup`, `evidence`, `geo`, `shortage`, `review`, `risk`).
+- Databricks App `dbx-hack-doctors` exists, but app compute reported `STOPPED`.
+- Databricks Job id `590750946177761` exists in local env/config, but a validation smoke run could not start because the workspace/account returned: `Triggering new runs for organization 7474647758171864 is currently disabled temporarily.`
+- `app/app.yaml` currently sets `PIPELINE_MODE=local`, which is the right steady-state fallback for a clickable demo until Databricks Job mode can be revalidated.
+- UI copy/badges should treat review counts as notifications/work queue items, not as agent counts or failed task counts.
+
 ## Unity Catalog Persistence Gap
 
 Current agent outputs stay in pipeline state JSON. The next persistence work is:

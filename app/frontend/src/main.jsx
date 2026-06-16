@@ -558,16 +558,37 @@ function AgentCard({ name, agentState }) {
   );
 }
 
-function PipelinePanel({ pipeline, onStart, busy, ingestRecords }) {
+function PipelinePanel({ pipeline, onStart, busy, ingestRecords, className = "" }) {
   const status = pipeline?.status || "idle";
   const agents = pipeline?.agents || {};
   const riskResult = agents.risk?.result || {};
+  const reviewSummary = agents.review?.result?.summary || {};
+  const pincodeSummary = agents.pincode?.result?.summary || {};
+  const evidenceSummary = agents.evidence?.result?.summary || {};
+  const completedAgents = AGENT_NAMES.filter((name) => agents[name]?.status === "completed").length;
+  const openPipelineNotifications = [
+    {
+      label: "Review gate",
+      value: reviewSummary.review_count || 0,
+      detail: "proof/reject items from dedupe, PIN, evidence, geo, and shortage signals"
+    },
+    {
+      label: "PIN enrichment",
+      value: pincodeSummary.review_item_count || 0,
+      detail: "postal rows that need review before automatic geography enrichment"
+    },
+    {
+      label: "Evidence checks",
+      value: evidenceSummary.review_claims || 0,
+      detail: "weak or suspicious capability claims"
+    }
+  ].filter((item) => Number(item.value || 0) > 0);
   const tone = STATUS_TONE[status] || "neutral";
   const isRunning = status === "running";
   const pipelineMode = pipeline?.mode || "analysis";
 
   return (
-    <div className="panel">
+    <div className={`panel ${className}`.trim()}>
       <div className="panel-head">
         <div>
           <h2>AI Pipeline</h2>
@@ -578,6 +599,11 @@ function PipelinePanel({ pipeline, onStart, busy, ingestRecords }) {
             {pipeline?.pipeline_id ? <span className="run-id"> Run: {pipeline.pipeline_id}</span> : null}
             {pipeline?.mode ? <span className="run-id"> [{pipeline.mode}]</span> : null}
           </p>
+          {status === "completed" ? (
+            <p className="pipeline-steady">
+              {completedAgents}/{AGENT_NAMES.length} agents completed. Green means the last run finished cleanly; notifications below are review work, not failed tasks.
+            </p>
+          ) : null}
         </div>
         <div className="button-row">
           <span className={`badge badge-${tone}`}>{status}</span>
@@ -591,6 +617,18 @@ function PipelinePanel({ pipeline, onStart, busy, ingestRecords }) {
           </button>
         </div>
       </div>
+
+      {status === "completed" && openPipelineNotifications.length ? (
+        <div className="pipeline-notifications" aria-label="Pipeline review notifications">
+          {openPipelineNotifications.map((item) => (
+            <div className="pipeline-notice" key={item.label} title={item.detail}>
+              <span>{item.label}</span>
+              <b>{Number(item.value || 0).toLocaleString()}</b>
+              <small>{item.detail}</small>
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="agent-grid">
         {AGENT_NAMES.map((name) => (
@@ -639,15 +677,22 @@ function ImportPipeline({ scratchpad, setScratchpad, onSaveScratchpad, onReparse
   }
 
   return (
-    <section className="page-grid">
-      <div className="panel">
+    <section className="import-pipeline-layout">
+      <div className="panel import-strip">
         <div className="panel-head">
           <div>
             <h2>Import</h2>
             <p>Stage XLS, XLSX, or CSV before it touches trusted tables.</p>
           </div>
         </div>
-        <label className="dropzone">
+        <label
+          className="dropzone import-dropzone"
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => {
+            event.preventDefault();
+            previewUpload(event.dataTransfer.files?.[0] || null);
+          }}
+        >
           <input type="file" accept=".csv,.xls,.xlsx" onChange={(event) => previewUpload(event.target.files?.[0] || null)} />
           <span>{upload ? upload.name : "Drop or choose a facility file"}</span>
         </label>
@@ -661,39 +706,42 @@ function ImportPipeline({ scratchpad, setScratchpad, onSaveScratchpad, onReparse
         ) : null}
       </div>
 
-      <PipelinePanel
-        pipeline={pipeline}
-        onStart={onPipelineStart}
-        busy={pipelineBusy}
-        ingestRecords={uploadPreview?.preview || null}
-      />
-
-      <div className="panel scratchpad full">
-        <div className="panel-head">
-          <div>
-            <h2>Scratchpad</h2>
-            <p>Markdown notes, comments, and tags that steer the next parse.</p>
-          </div>
-          <div className="button-row wrap">
-            <div className="segmented">
-              <button className={scratchpadMode === "view" ? "active" : ""} onClick={() => setScratchpadMode("view")}>
-                View
-              </button>
-              <button className={scratchpadMode === "edit" ? "active" : ""} onClick={() => setScratchpadMode("edit")}>
-                Edit
+      <div className="import-workspace-grid">
+        <div className="panel scratchpad">
+          <div className="panel-head">
+            <div>
+              <h2>Scratchpad</h2>
+              <p>Markdown notes, comments, and tags that steer the next parse.</p>
+            </div>
+            <div className="button-row wrap">
+              <div className="segmented">
+                <button className={scratchpadMode === "view" ? "active" : ""} onClick={() => setScratchpadMode("view")}>
+                  View
+                </button>
+                <button className={scratchpadMode === "edit" ? "active" : ""} onClick={() => setScratchpadMode("edit")}>
+                  Edit
+                </button>
+              </div>
+              <button onClick={onSaveScratchpad}>Save</button>
+              <button className="primary" onClick={onReparse} disabled={busy}>
+                {busy ? "Parsing..." : "Trigger re-parse"}
               </button>
             </div>
-            <button onClick={onSaveScratchpad}>Save</button>
-            <button className="primary" onClick={onReparse} disabled={busy}>
-              {busy ? "Parsing..." : "Trigger re-parse"}
-            </button>
           </div>
+          {scratchpadMode === "edit" ? (
+            <textarea value={scratchpad} onChange={(event) => setScratchpad(event.target.value)} spellCheck="false" />
+          ) : (
+            <div className="markdown-view">{renderMarkdown(scratchpad)}</div>
+          )}
         </div>
-        {scratchpadMode === "edit" ? (
-          <textarea value={scratchpad} onChange={(event) => setScratchpad(event.target.value)} spellCheck="false" />
-        ) : (
-          <div className="markdown-view">{renderMarkdown(scratchpad)}</div>
-        )}
+
+        <PipelinePanel
+          className="pipeline-column"
+          pipeline={pipeline}
+          onStart={onPipelineStart}
+          busy={pipelineBusy}
+          ingestRecords={uploadPreview?.preview || null}
+        />
       </div>
     </section>
   );
@@ -755,13 +803,13 @@ function tabBadgeCounts(state, pipeline) {
   ].filter((value) => Number(value || 0) > 0).length;
   const agents = pipeline?.agents || {};
   const runningAgents = Object.values(agents).filter((agent) => ["running", "pending"].includes(agent?.status)).length;
-  const reviewItems = agents.review?.result?.summary?.review_count || 0;
+  const completedAgents = AGENT_NAMES.filter((name) => agents[name]?.status === "completed").length;
   const importPipelineCount =
     pipeline?.status === "running"
       ? runningAgents || 1
       : pipeline?.status === "completed"
-        ? reviewItems
-        : 1;
+        ? completedAgents || AGENT_NAMES.length
+        : 0;
 
   return {
     "Current State": driverCount,
@@ -788,16 +836,20 @@ function ActionsQueue({ state, onDecision, focus }) {
   }, [focus]);
 
   const queueOrder = ["All", "Human review", "Agent ready", "Evidence review", "Steward triage", "Open queue", "Closed"];
-  const filtered = useMemo(() => actions.filter((action) => {
+  const filterActions = (overrides = {}) => {
+    const active = { ...filters, ...overrides };
+    return actions.filter((action) => {
     const queue = inferredQueue(action);
     return (
-      (filters.queue === "All" || queue === filters.queue) &&
-      (filters.priority === "All" || action.priority === filters.priority) &&
-      (filters.owner === "All" || action.owner === filters.owner) &&
-      (filters.status === "All" || action.status === filters.status) &&
-      (filters.issue === "All" || action.issue_type === filters.issue)
+        (active.queue === "All" || queue === active.queue) &&
+        (active.priority === "All" || action.priority === active.priority) &&
+        (active.owner === "All" || action.owner === active.owner) &&
+        (active.status === "All" || action.status === active.status) &&
+        (active.issue === "All" || action.issue_type === active.issue)
     );
-  }), [actions, filters]);
+    });
+  };
+  const filtered = useMemo(() => filterActions(), [actions, filters]);
 
   useEffect(() => {
     if (!selected || !filtered.some((action) => action.action_id === selected.action_id)) {
@@ -846,8 +898,12 @@ function ActionsQueue({ state, onDecision, focus }) {
 
   const queueCounts = queueOrder.slice(1).map((queue) => ({
     queue,
-    count: actions.filter((action) => inferredQueue(action) === queue).length
+    count: filterActions({ queue }).length
   }));
+  const visibleAllActionsCount = filterActions({ queue: "All" }).length;
+  const visibleNeedsReviewCount = filterActions({ queue: "Human review" }).length;
+  const visibleAgentReadyCount = filterActions({ queue: "Agent ready" }).length;
+  const visibleDecisionRequiredCount = filtered.filter((a) => a.decision_required !== false && inferredQueue(a) !== "Closed").length;
   const selectedQueue = inferredQueue(selected);
   const decisionButtons = selected ? actionButtonsFor(selected) : [];
 
@@ -861,28 +917,31 @@ function ActionsQueue({ state, onDecision, focus }) {
           </div>
           <div className="filters">
             {["priority", "issue", "owner", "status"].map((key) => (
-              <select key={key} value={filters[key]} onChange={(event) => setFilters({ ...filters, [key]: event.target.value })}>
-                <option>All</option>
-                {[...new Set(actions.map((action) => (key === "issue" ? action.issue_type : action[key])).filter(Boolean))].map((value) => (
-                  <option key={value}>{value}</option>
-                ))}
-              </select>
+              <label className="filter-field" key={key}>
+                <span>{key === "issue" ? "Issue" : key.charAt(0).toUpperCase() + key.slice(1)}</span>
+                <select value={filters[key]} onChange={(event) => setFilters({ ...filters, [key]: event.target.value })}>
+                  <option>All</option>
+                  {[...new Set(actions.map((action) => (key === "issue" ? action.issue_type : action[key])).filter(Boolean))].map((value) => (
+                    <option key={value}>{value}</option>
+                  ))}
+                </select>
+              </label>
             ))}
           </div>
         </div>
         <div className="queue-lanes">
           <button className={filters.queue === "All" ? "queue-lane active" : "queue-lane"} onClick={() => applyFilter({ queue: "All" })}>
             <span>All actions</span>
-            <b>{actions.length.toLocaleString()}</b>
-            <small>full queue</small>
+            <b>{visibleAllActionsCount.toLocaleString()}</b>
+            <small>{filters.priority === "All" && filters.issue === "All" && filters.owner === "All" && filters.status === "All" ? "full queue" : "with current filters"}</small>
           </button>
-          {queueCounts.map(({ queue, count }) => (
-            <button key={queue} className={filters.queue === queue ? "queue-lane active" : "queue-lane"} onClick={() => applyFilter({ queue })}>
-              <span>{queue}</span>
-              <b>{count.toLocaleString()}</b>
-              <small>{queue === "Agent ready" ? "safe fix candidates" : queue === "Closed" ? "decided items" : "proof/reject work"}</small>
-            </button>
-          ))}
+            {queueCounts.map(({ queue, count }) => (
+              <button key={queue} className={filters.queue === queue ? "queue-lane active" : "queue-lane"} onClick={() => applyFilter({ queue })}>
+                <span>{queue}</span>
+                <b>{count.toLocaleString()}</b>
+                <small>{filters.priority === "All" && filters.issue === "All" && filters.owner === "All" && filters.status === "All" ? "full queue" : "with current filters"}</small>
+              </button>
+            ))}
         </div>
         <div className="queue-summary">
           <Metric
@@ -893,21 +952,21 @@ function ActionsQueue({ state, onDecision, focus }) {
           />
           <Metric
             label="Needs review"
-            value={actions.filter((a) => inferredQueue(a) === "Human review").length.toLocaleString()}
-            detail="human queue"
+            value={visibleNeedsReviewCount.toLocaleString()}
+            detail="visible human queue"
             tone="risk"
             onClick={() => applyFilter({ queue: "Human review", status: "Needs review", owner: "Human" })}
           />
           <Metric
             label="Agent ready"
-            value={actions.filter((a) => inferredQueue(a) === "Agent ready").length.toLocaleString()}
-            detail="safe-fix candidates"
+            value={visibleAgentReadyCount.toLocaleString()}
+            detail="visible safe fixes"
             onClick={() => applyFilter({ queue: "Agent ready", status: "Ready", owner: "AI agent" })}
           />
           <Metric
             label="Decision required"
-            value={actions.filter((a) => a.decision_required !== false && inferredQueue(a) !== "Closed").length.toLocaleString()}
-            detail="open proof/reject items"
+            value={visibleDecisionRequiredCount.toLocaleString()}
+            detail="visible proof/reject items"
             tone="warn"
             onClick={() => applyFilter({ queue: "All", status: "All" })}
           />
@@ -926,19 +985,8 @@ function ActionsQueue({ state, onDecision, focus }) {
             { key: "status", label: "Status" },
             {
               key: "action",
-              label: "Action",
-              render: (row) => (
-                <button
-                  className="small-button"
-                  aria-label={`Open details for ${row.recommendation}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    chooseAction(row, true);
-                  }}
-                >
-                  Open details
-                </button>
-              )
+              label: "",
+              render: (row) => <span className="row-detail-hint">{selected?.action_id === row.action_id ? "Selected" : "Select row"}</span>
             }
           ]}
         />
@@ -979,7 +1027,10 @@ function ActionsQueue({ state, onDecision, focus }) {
             {decisionButtons.map((button) => (
               <button
                 key={button.status}
-                className={button.tone === "primary" ? "primary" : ""}
+                className={[
+                  button.tone === "primary" ? "primary" : "",
+                  button.status === "Approved" ? "approve" : ""
+                ].filter(Boolean).join(" ")}
                 disabled={!selected || Boolean(decisionBusy)}
                 onClick={() => decide(button)}
               >

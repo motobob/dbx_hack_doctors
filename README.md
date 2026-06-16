@@ -147,6 +147,22 @@ Or run the full local dev pair from the repo root:
 
 `run.sh dev` automatically chooses the next free API/UI ports if `8000` or `5173` are already occupied. You can force ports with `API_PORT=8001 UI_PORT=5174 ./run.sh dev`.
 
+When Databricks is unavailable or you want a fully offline click-through, use:
+
+```bash
+./run.sh dev local
+```
+
+`dev local` starts the same Vite UI and FastAPI API, but forces the backend into checked-in/offline mode:
+
+- Source data comes from the downloaded facilities CSV under `data/raw/.../facilities.csv.gz`.
+- Scratchpad, parse output, decisions, and pipeline state are written to local `app/state` files.
+- The 10-agent pipeline runs in-process with `PIPELINE_MODE=local`.
+- LLM calls are disabled with `AGENT_LLM_ENABLED=false`, so a stray `DATABRICKS_TOKEN` does not make local agents call a serving endpoint.
+- Basic Auth is disabled for local development.
+
+Local mode is the right path for UI work, import previews, action queue decisions, risk workflow checks, and deterministic agent smoke tests while waiting on DBX credits. It does not validate Unity Catalog reads/writes, Databricks SQL auth, Databricks Jobs orchestration, Databricks Apps deployment behavior, or model-serving calls.
+
 The Databricks App command is defined in `app/app.yaml`.
 
 ### Solution Architecture
@@ -220,31 +236,37 @@ flowchart TB
 
 ### Agent Pipeline
 
-The app includes an ingestion-led skeleton agent workflow. Agent specs, state shape, runtime modes, and current persistence gaps are documented in `app/lib/agents/SPEC.md`.
+The app includes an ingestion-led skeleton agent workflow with **10 runtime agents/tasks**. Agent specs, state shape, runtime modes, and current persistence gaps are documented in `app/lib/agents/SPEC.md`.
 
 ```mermaid
 flowchart LR
-  ingest[Ingestion Manager] --> qa[QA/Profile Agent]
-  qa --> pin[PIN Directory Agent]
-  qa --> nfhs[NFHS Survey Agent]
-  qa --> dedupe[Dedupe Agent]
-  qa --> evidence[Evidence and Specialty Agent]
-  qa --> geo[Geo Agent]
+  start[POST /api/pipeline/start] --> ingest[1 Ingestion Manager]
+  ingest --> qa[2 QA/Profile Agent]
+  qa --> pin[3 PIN Directory Agent]
+  qa --> nfhs[4 NFHS Survey Agent]
+  qa --> dedupe[5 Dedupe Agent]
+  qa --> evidence[6 Evidence and Specialty Agent]
+  qa --> geo[7 Geo Agent]
   pin --> geo
-  dedupe --> review[Human review gate]
-  evidence --> trust[Trust scoring]
-  geo --> trust
-  nfhs --> trust
-  trust --> risk[Risk Planning Agent]
-  review --> risk
+  dedupe --> shortage[8 Shortage Agent]
+  evidence --> shortage
+  geo --> shortage
+  nfhs --> shortage
+  shortage --> review[9 Human Review Gate]
+  review --> risk[10 Risk Planning Agent]
+  risk --> ui[Pipeline status and notifications]
 ```
 
 Current status:
 
 - Local in-process pipeline: implemented and clickable through `POST /api/pipeline/start`.
 - Skeleton agents complete without requiring LLM calls when `AGENT_LLM_ENABLED=false`.
-- Databricks multi-task Job: scaffolded by `scripts/setup_dbx_job.py`.
-- Databricks Job deployment: not considered verified until `DATABRICKS_PIPELINE_JOB_ID` exists, deployed `PIPELINE_MODE=databricks`, and all agent tasks complete end to end.
+- Databricks multi-task Job: scaffolded by `scripts/setup_dbx_job.py`; current job id is `590750946177761`.
+- Databricks App status checked on 2026-06-16: app object exists, but app compute was `STOPPED`.
+- Databricks Job status checked on 2026-06-16: new runs were blocked by the workspace/account message `Triggering new runs for organization 7474647758171864 is currently disabled temporarily.`
+- Deployed app pipeline mode is currently `PIPELINE_MODE=local` in `app/app.yaml`, so the deployed UI can stay clickable even while Databricks Job mode is not verified.
+- Databricks Job deployment is not considered verified until `DATABRICKS_PIPELINE_JOB_ID` exists, deployed `PIPELINE_MODE=databricks`, and all 10 agent tasks complete end to end.
+- The Import + Pipeline tab badge shows agent run progress/completion. Review counts such as `52` are pipeline notifications/review items, not agent counts or task failures.
 - Design-session note: `docs/design-session-2026-06-15-agent-architecture.md`.
 - Agent workflow rulebook:
   - `agents/ingestion_agent.md`: orchestrator and sub-agent operating prompts.
@@ -291,7 +313,11 @@ Checked-in/offline click-through mode:
 APP_DATA_MODE=local
 APP_SOURCE_MODE=checked_in
 APP_STATE_MODE=local
+PIPELINE_MODE=local
+AGENT_LLM_ENABLED=false
 ```
+
+The `./run.sh dev local` shortcut applies those offline settings for the API process without changing `.env`.
 
 Databricks source/target defaults:
 

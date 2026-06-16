@@ -128,6 +128,7 @@ Completed/working now:
 - [x] DedupAgent ingest mode — compares uploaded records against existing dataset.
 - [x] Pipeline state API: `POST /api/pipeline/start`, `GET /api/pipeline/status[/{id}]`.
 - [x] Pipeline status panel in UI with per-agent cards and 3-second polling.
+- [x] Pipeline tab badge now reports agent progress/completion; pipeline review counts show as contextual notifications inside Import + Pipeline instead of implying 52 agents/actions failed.
 - [x] "Run ingestion pipeline" button in Import panel — passes uploaded records into the ten-agent ingestion workflow.
 - [x] LLM via Databricks Foundation Models (`/serving-endpoints`, OpenAI-compatible).
 - [x] Databricks Job setup script (`scripts/setup_dbx_job.py`).
@@ -143,7 +144,9 @@ Completed/working now:
 - [x] Databricks Job ingestion failure diagnosed on run `92661075111108`: Spark Python task did not define `__file__` in `app/jobs/run_agent.py`.
 - [x] Databricks Job entrypoint patched to resolve app path without `__file__`.
 - [x] Databricks Job source read patched to use Spark `collect()` in job mode instead of Databricks SQL connector Arrow fetch.
-- [ ] Databricks Job validation: latest run `255341043566317` still failed at `ingestion`; downstream tasks were skipped. Fetch task output before the next fix.
+- [ ] Databricks App compute is currently stopped: validation on 2026-06-16 returned `STOPPED` for `dbx-hack-doctors`.
+- [ ] Databricks Job validation is currently blocked: validation on 2026-06-16 could not start a run because new runs for organization `7474647758171864` are temporarily disabled.
+- [ ] Earlier Databricks Job validation: run `255341043566317` still failed at `ingestion`; downstream tasks were skipped. Fetch task output after workspace job runs are enabled again.
 - [ ] Databricks Job mode deployed and verified end-to-end.
 
 ## Priority Next Actions
@@ -407,7 +410,7 @@ Latest validation:
   .venv/bin/python scripts/smoke_local_e2e.py
   ```
   Expected marker: `LOCAL_E2E_SMOKE_OK`.
-- [ ] Databricks multi-task Job exists but is not validated: latest run `255341043566317` still failed at `ingestion`; task output still needs inspection.
+- [ ] Databricks multi-task Job exists but is not validated: app compute is stopped and new job runs were blocked on 2026-06-16; earlier run `255341043566317` still needs task output inspection after runs are enabled again.
 
 ## Phase 7: AI Evidence Extraction
 
