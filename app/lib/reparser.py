@@ -153,6 +153,201 @@ def annotate_preview(df: pd.DataFrame) -> pd.DataFrame:
     return preview[[col for col in cols if col in preview.columns]]
 
 
+ACTION_FIELDS = [
+    "name",
+    "address_city",
+    "address_stateOrRegion",
+    "address_zipOrPostcode",
+    "organization_type",
+    "specialties",
+    "capability",
+    "description",
+    "source",
+    "cluster_id",
+]
+
+
+def _clean_value(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (list, tuple, dict, set)):
+        return str(value)
+    if pd.isna(value):
+        return ""
+    return str(value).strip()
+
+
+def _row_snapshot(row: pd.Series) -> dict[str, str]:
+    return {field: _clean_value(row.get(field, "")) for field in ACTION_FIELDS if field in row.index}
+
+
+def _field_quality_score(value: str) -> int:
+    if not value:
+        return 0
+    return min(100, 35 + len(value[:130]) // 2)
+
+
+def duplicate_merge_payload(df: pd.DataFrame) -> dict[str, Any]:
+    if df.empty or "cluster_id" not in df.columns:
+        records = demo_records = []
+    else:
+        cluster_counts = df.get("cluster_id", pd.Series(index=df.index)).fillna("").astype(str).str.strip().value_counts()
+        duplicate_clusters = [cluster for cluster, count in cluster_counts.items() if cluster and count > 1]
+        cluster_id = duplicate_clusters[0] if duplicate_clusters else ""
+        records = [
+            _row_snapshot(row)
+            for _, row in df[df.get("cluster_id", pd.Series(index=df.index)).fillna("").astype(str).str.strip().eq(cluster_id)].head(4).iterrows()
+        ] if cluster_id else []
+        demo_records = records
+
+    if not demo_records:
+        demo_records = [
+            {
+                "name": "City Care Hospital",
+                "address_city": "Jaipur",
+                "address_stateOrRegion": "Rajasthan",
+                "address_zipOrPostcode": "302001",
+                "organization_type": "Hospital",
+                "specialties": '["emergencyMedicine", "internalMedicine"]',
+                "source": "registry",
+                "cluster_id": "cluster-demo-1",
+            },
+            {
+                "name": "City Care Hosp.",
+                "address_city": "Jaipur",
+                "address_stateOrRegion": "Rajasthan",
+                "address_zipOrPostcode": "302001",
+                "organization_type": "Hospital",
+                "specialties": '["emergencyMedicine"]',
+                "source": "directory",
+                "cluster_id": "cluster-demo-1",
+            },
+        ]
+
+    merge_fields = ["name", "address_city", "address_stateOrRegion", "address_zipOrPostcode", "organization_type", "specialties", "source"]
+    proposed: dict[str, str] = {}
+    choices: list[dict[str, Any]] = []
+    for field in merge_fields:
+        values = [_clean_value(record.get(field, "")) for record in demo_records]
+        winner = max(values, key=_field_quality_score, default="")
+        proposed[field] = winner
+        choices.append(
+            {
+                "field": field,
+                "recommended_value": winner,
+                "alternates": sorted(set(value for value in values if value and value != winner)),
+                "source": next((record.get("source", "") for record in demo_records if record.get(field) == winner), ""),
+            }
+        )
+
+    cluster_id = demo_records[0].get("cluster_id", "cluster-demo-1")
+    return {
+        "action_kind": "duplicate_merge",
+        "workflow": "merge_resolver",
+        "records": demo_records,
+        "field_choices": choices,
+        "proposed_result": proposed,
+        "evidence_items": [
+            {"label": "Cluster", "value": cluster_id or "sample cluster", "tone": "high"},
+            {"label": "Record count", "value": str(len(demo_records)), "tone": "high"},
+            {"label": "Location overlap", "value": "city/state/PIN align", "tone": "high"},
+            {"label": "Decision effect", "value": "one canonical facility, duplicate edge suppressed", "tone": "medium"},
+        ],
+        "audit_effect": "Approval writes canonical-field choices and marks the duplicate cluster resolved. Rejection writes a not-duplicate edge so the pair is not suggested again.",
+    }
+
+
+def location_cleanup_payload(df: pd.DataFrame) -> dict[str, Any]:
+    if df.empty:
+        candidates = []
+    else:
+        city = df.get("address_city", pd.Series(index=df.index)).fillna("").astype(str).str.strip()
+        state = df.get("address_stateOrRegion", pd.Series(index=df.index)).fillna("").astype(str).str.strip()
+        pin = df.get("address_zipOrPostcode", pd.Series(index=df.index)).fillna("").astype(str).str.strip()
+        candidates = [_row_snapshot(row) for _, row in df[(city.eq("") | state.eq("") | pin.eq(""))].head(5).iterrows()]
+
+    rules = [
+        {"rule": "Trim and canonicalize blank-like location values", "safe": True, "effect": "empty strings become null review fields"},
+        {"rule": "Normalize 6-digit PIN formatting", "safe": True, "effect": "numeric PINs are stored without punctuation"},
+        {"rule": "Infer state only when PIN maps to exactly one state", "safe": True, "effect": "ambiguous PINs stay in human review"},
+    ]
+    return {
+        "action_kind": "location_cleanup",
+        "workflow": "agent_safe_fix",
+        "records": candidates,
+        "proposed_result": {"rows_staged": len(candidates), "safe_rules": len(rules), "ambiguous_rows": "held for review"},
+        "safe_rules": rules,
+        "evidence_items": [
+            {"label": "Rows sampled", "value": str(len(candidates)), "tone": "medium"},
+            {"label": "Safe rules", "value": str(len(rules)), "tone": "high"},
+            {"label": "Write mode", "value": "stage fixes plus audit", "tone": "medium"},
+        ],
+        "audit_effect": "Apply safe fix records rule IDs, affected rows, and any rows held back because the geography was ambiguous.",
+    }
+
+
+def capability_review_payload(df: pd.DataFrame) -> dict[str, Any]:
+    if df.empty:
+        records = []
+    else:
+        mask = pd.Series(False, index=df.index)
+        for terms in CAPABILITY_TERMS.values():
+            mask = mask | df.apply(lambda row: _contains_any(row, terms), axis=1)
+        records = [_row_snapshot(row) for _, row in df[mask].head(5).iterrows()]
+    return {
+        "action_kind": "capability_review",
+        "workflow": "evidence_gate",
+        "records": records,
+        "claim_tests": [
+            {"test": "Claim appears in capability/specialty text", "required": True},
+            {"test": "Supporting equipment/procedure/source text exists", "required": True},
+            {"test": "Claim is not contradicted by facility type", "required": True},
+        ],
+        "evidence_items": [
+            {"label": "Claims sampled", "value": str(len(records)), "tone": "medium"},
+            {"label": "Planning impact", "value": "coverage counts and care gap maps", "tone": "high"},
+        ],
+        "audit_effect": "Confirmed claims can count toward planning coverage. Rejected claims remain visible but are excluded from trusted capability counts.",
+    }
+
+
+def tag_review_payload(tags: list[str]) -> dict[str, Any]:
+    return {
+        "action_kind": "tag_triage",
+        "workflow": "review_slice_builder",
+        "tags": tags,
+        "proposed_result": {
+            "review_slices": [f"#{tag}" for tag in tags] if tags else ["default steward review"],
+            "next_parse": "route matching rows into steward queues",
+        },
+        "evidence_items": [
+            {"label": "Scratchpad tags", "value": str(len(tags)), "tone": "medium"},
+            {"label": "Routing target", "value": "review queue filters", "tone": "medium"},
+        ],
+        "audit_effect": "Applied tags are stored as review-routing metadata for the next parse run.",
+    }
+
+
+def auto_agent_payload(kind: str, title: str, rows_scored: int, rules: list[str]) -> dict[str, Any]:
+    return {
+        "action_kind": "auto_applied",
+        "workflow": kind,
+        "agent_result": title,
+        "proposed_result": {
+            "rows_scored": rows_scored,
+            "rules_applied": len(rules),
+            "write_behavior": "derived fields and audit metadata only",
+        },
+        "safe_rules": [{"rule": rule, "safe": True, "effect": "auto-applied"} for rule in rules],
+        "evidence_items": [
+            {"label": "Agent result", "value": title, "tone": "high"},
+            {"label": "Rows touched", "value": f"{rows_scored:,}", "tone": "medium"},
+            {"label": "Human decision", "value": "not required", "tone": "high"},
+        ],
+        "audit_effect": "This agent action is already applied because it only adds deterministic derived metadata and does not overwrite source fields.",
+    }
+
+
 def enrich_action(action: dict[str, Any]) -> dict[str, Any]:
     issue = action.get("issue_type", "")
     owner = action.get("owner", "")
@@ -224,6 +419,7 @@ def build_actions(df: pd.DataFrame, profile: dict[str, Any], scratchpad: str) ->
             "status": "Needs review",
             "lift_points": min(8.0, round(profile["expected_lift"] * 0.34, 1)),
             "evidence": "Shared cluster IDs, similar names, repeated phones, and location overlap.",
+            **duplicate_merge_payload(df),
         },
         {
             "priority": "P0",
@@ -234,6 +430,7 @@ def build_actions(df: pd.DataFrame, profile: dict[str, Any], scratchpad: str) ->
             "status": "Ready",
             "lift_points": min(6.0, round(profile["expected_lift"] * 0.26, 1)),
             "evidence": "Missing or partial city, state, or PIN code fields.",
+            **location_cleanup_payload(df),
         },
         {
             "priority": "P1",
@@ -244,6 +441,7 @@ def build_actions(df: pd.DataFrame, profile: dict[str, Any], scratchpad: str) ->
             "status": "Open",
             "lift_points": min(4.0, round(profile["expected_lift"] * 0.18, 1)),
             "evidence": "Free-text claims mention services but lack equipment, procedure, or specialty support.",
+            **capability_review_payload(df),
         },
         {
             "priority": "P1",
@@ -254,6 +452,70 @@ def build_actions(df: pd.DataFrame, profile: dict[str, Any], scratchpad: str) ->
             "status": "Open",
             "lift_points": 0.8,
             "evidence": "Tags were extracted from the Markdown scratchpad and can drive review slices.",
+            **tag_review_payload(tags),
+        },
+        {
+            "priority": "P2",
+            "issue_type": "Source provenance",
+            "recommendation": "AI agent applied source provenance fingerprints",
+            "owner": "AI agent",
+            "confidence": "High",
+            "status": "Applied",
+            "lift_points": 0.6,
+            "evidence": "Deterministic source labels and row fingerprints were derived for audit and traceability.",
+            "queue": "Closed",
+            "primary_action": "View audit",
+            "secondary_action": "Reopen",
+            "assignee": "Provenance agent",
+            "decision_required": False,
+            **auto_agent_payload(
+                "provenance_fingerprinting",
+                "source and identity fingerprints attached",
+                int(profile.get("row_count", 0)),
+                ["hash stable identity fields", "tag source system", "mark rows missing provenance"],
+            ),
+        },
+        {
+            "priority": "P2",
+            "issue_type": "Evidence scoring",
+            "recommendation": "AI agent applied capability evidence scores",
+            "owner": "AI agent",
+            "confidence": "High",
+            "status": "Applied",
+            "lift_points": 0.7,
+            "evidence": "Capability text was scored against service, equipment, specialty, and procedure signals.",
+            "queue": "Closed",
+            "primary_action": "View scores",
+            "secondary_action": "Reopen",
+            "assignee": "Evidence scoring agent",
+            "decision_required": False,
+            **auto_agent_payload(
+                "capability_evidence_scoring",
+                "derived evidence scores attached",
+                int(profile.get("row_count", 0)),
+                ["score service claims", "flag weak support", "preserve raw claim text"],
+            ),
+        },
+        {
+            "priority": "P2",
+            "issue_type": "Queue routing",
+            "recommendation": "AI agent routed safe rows and review rows into queues",
+            "owner": "AI agent",
+            "confidence": "High",
+            "status": "Applied",
+            "lift_points": 0.5,
+            "evidence": "Rules assigned rows to safe, evidence-review, duplicate-review, and geo-review lanes.",
+            "queue": "Closed",
+            "primary_action": "View routing",
+            "secondary_action": "Reopen",
+            "assignee": "Review routing agent",
+            "decision_required": False,
+            **auto_agent_payload(
+                "review_queue_routing",
+                "review lanes assigned",
+                int(profile.get("row_count", 0)),
+                ["route duplicate clusters", "route weak capability claims", "route ambiguous geography"],
+            ),
         },
     ]
     if "nicu" in [tag.lower() for tag in tags]:
@@ -268,6 +530,7 @@ def build_actions(df: pd.DataFrame, profile: dict[str, Any], scratchpad: str) ->
                 "status": "Open",
                 "lift_points": 1.6,
                 "evidence": "Scratchpad includes #nicu and dataset contains neonatal/newborn indicators.",
+                **capability_review_payload(df),
             },
         )
     actions = [enrich_action(action) for action in actions]

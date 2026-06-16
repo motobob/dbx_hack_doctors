@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
-const tabs = ["Current State", "Import + Pipeline", "Actions", "Risk Recommendations"];
+const tabs = ["Current State", "NGO Planner", "Import + Pipeline", "Actions", "Risk Recommendations"];
 
 const SCORE_DEFINITIONS = {
   "Data consistency":
@@ -785,6 +785,420 @@ function actionButtonsFor(action) {
   ];
 }
 
+function ActionEvidenceGrid({ items = [] }) {
+  if (!items.length) return null;
+  return (
+    <div className="evidence-grid">
+      {items.map((item, index) => (
+        <div className={`evidence-card evidence-${item.tone || "medium"}`} key={`${item.label}-${index}`}>
+          <span>{item.label}</span>
+          <b>{item.value}</b>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RecordsComparison({ records = [] }) {
+  if (!records.length) return <p className="helper-text">No row-level records were attached to this action.</p>;
+  const fields = ["name", "address_city", "address_stateOrRegion", "address_zipOrPostcode", "organization_type", "specialties", "source"];
+  return (
+    <div className="comparison-table">
+      <div className="comparison-head">
+        <b>Field</b>
+        {records.map((record, index) => <b key={index}>Record {index + 1}</b>)}
+      </div>
+      {fields.map((field) => (
+        <div className="comparison-row" key={field}>
+          <span>{field}</span>
+          {records.map((record, index) => (
+            <div key={`${field}-${index}`}>{record[field] || <em>blank</em>}</div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ProposedResult({ result }) {
+  if (!result || Object.keys(result).length === 0) return null;
+  return (
+    <div className="proposed-result">
+      {Object.entries(result).map(([key, value]) => (
+        <div key={key}>
+          <span>{key.replaceAll("_", " ")}</span>
+          <b>{Array.isArray(value) ? value.join(", ") : String(value || "blank")}</b>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SafeRules({ rules = [] }) {
+  if (!rules.length) return null;
+  return (
+    <div className="rule-list">
+      {rules.map((rule, index) => (
+        <div className="rule-row" key={`${rule.rule}-${index}`}>
+          <b>{rule.rule}</b>
+          <span>{rule.effect}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DuplicateMergeWorkspace({ action, note, setNote }) {
+  const [choices, setChoices] = useState(() => {
+    const initial = {};
+    (action.field_choices || []).forEach((choice) => {
+      initial[choice.field] = choice.recommended_value || "";
+    });
+    return initial;
+  });
+
+  useEffect(() => {
+    const next = {};
+    (action.field_choices || []).forEach((choice) => {
+      next[choice.field] = choice.recommended_value || "";
+    });
+    setChoices(next);
+  }, [action.action_id]);
+
+  function recordChoice(field, value) {
+    const next = { ...choices, [field]: value };
+    setChoices(next);
+    const compact = Object.entries(next)
+      .map(([key, chosen]) => `${key}=${chosen || "blank"}`)
+      .join("; ");
+    setNote(`Merge approved with canonical fields: ${compact}`);
+  }
+
+  return (
+    <div className="action-workspace">
+      <div>
+        <h3>Merge Resolver</h3>
+        <p>Compare the candidate records, choose canonical field values, then approve or reject the merge.</p>
+      </div>
+      <ActionEvidenceGrid items={action.evidence_items} />
+      <RecordsComparison records={action.records} />
+      <div className="field-choice-grid">
+        {(action.field_choices || []).map((choice) => (
+          <label key={choice.field}>
+            <span>{choice.field.replaceAll("_", " ")}</span>
+            <select value={choices[choice.field] || ""} onChange={(event) => recordChoice(choice.field, event.target.value)}>
+              <option value={choice.recommended_value || ""}>{choice.recommended_value || "blank"} · recommended</option>
+              {(choice.alternates || []).map((alternate) => <option key={alternate}>{alternate}</option>)}
+              <option value="">blank / unknown</option>
+            </select>
+          </label>
+        ))}
+      </div>
+      <h3>Proposed Canonical Facility</h3>
+      <ProposedResult result={{ ...(action.proposed_result || {}), ...choices }} />
+    </div>
+  );
+}
+
+function LocationCleanupWorkspace({ action }) {
+  return (
+    <div className="action-workspace">
+      <div>
+        <h3>Geo Cleanup Agent</h3>
+        <p>Safe deterministic rules can be applied immediately; ambiguous geography stays in review.</p>
+      </div>
+      <ActionEvidenceGrid items={action.evidence_items} />
+      <SafeRules rules={action.safe_rules} />
+      <RecordsComparison records={action.records} />
+      <ProposedResult result={action.proposed_result} />
+    </div>
+  );
+}
+
+function CapabilityReviewWorkspace({ action }) {
+  return (
+    <div className="action-workspace">
+      <div>
+        <h3>Evidence Gate</h3>
+        <p>Clinical claims only count for planning after the evidence tests pass.</p>
+      </div>
+      <ActionEvidenceGrid items={action.evidence_items} />
+      <div className="rule-list">
+        {(action.claim_tests || []).map((test, index) => (
+          <div className="rule-row" key={`${test.test}-${index}`}>
+            <b>{test.test}</b>
+            <span>{test.required ? "required for approval" : "optional"}</span>
+          </div>
+        ))}
+      </div>
+      <RecordsComparison records={action.records} />
+    </div>
+  );
+}
+
+function TagTriageWorkspace({ action }) {
+  return (
+    <div className="action-workspace">
+      <div>
+        <h3>Review Slice Builder</h3>
+        <p>Scratchpad tags become steward queues and filters for the next parse run.</p>
+      </div>
+      <ActionEvidenceGrid items={action.evidence_items} />
+      <div className="tag-strip">
+        {(action.tags || []).length ? action.tags.map((tag) => <span className="inline-tag" key={tag}>#{tag}</span>) : <span className="muted-pill">No tags yet</span>}
+      </div>
+      <ProposedResult result={action.proposed_result} />
+    </div>
+  );
+}
+
+function AutoAppliedWorkspace({ action }) {
+  return (
+    <div className="action-workspace auto-applied-workspace">
+      <div>
+        <h3>Auto-Applied Agent Action</h3>
+        <p>{action.agent_result || "This action already applied safe derived metadata."}</p>
+      </div>
+      <ActionEvidenceGrid items={action.evidence_items} />
+      <SafeRules rules={action.safe_rules} />
+      <ProposedResult result={action.proposed_result} />
+    </div>
+  );
+}
+
+function GenericActionWorkspace({ action }) {
+  return (
+    <div className="action-workspace">
+      <ActionEvidenceGrid items={action.evidence_items} />
+      <ProposedResult result={action.proposed_result} />
+    </div>
+  );
+}
+
+function ActionWorkspace({ action, note, setNote }) {
+  if (!action) return <p>Select an action to review evidence.</p>;
+  if (action.action_kind === "duplicate_merge") {
+    return <DuplicateMergeWorkspace action={action} note={note} setNote={setNote} />;
+  }
+  if (action.action_kind === "location_cleanup") return <LocationCleanupWorkspace action={action} />;
+  if (action.action_kind === "capability_review") return <CapabilityReviewWorkspace action={action} />;
+  if (action.action_kind === "tag_triage") return <TagTriageWorkspace action={action} />;
+  if (action.action_kind === "auto_applied") return <AutoAppliedWorkspace action={action} />;
+  return <GenericActionWorkspace action={action} />;
+}
+
+function priorityWeight(priority) {
+  const normalized = String(priority || "").toLowerCase();
+  if (normalized.includes("critical")) return 4;
+  if (normalized.includes("high")) return 3;
+  if (normalized.includes("medium")) return 2;
+  if (normalized.includes("low")) return 1;
+  return 0;
+}
+
+function confidenceLabel(score) {
+  const value = Number(score || 0);
+  if (value >= 80) return "High";
+  if (value >= 65) return "Medium";
+  return "Low";
+}
+
+function plannerTaskLabel(action) {
+  const issue = String(action.issue_type || "").toLowerCase();
+  if (issue.includes("duplicate")) return "Confirm facility count before coverage planning";
+  if (issue.includes("location")) return "Verify location before assigning field outreach";
+  if (issue.includes("nicu") || issue.includes("capability") || issue.includes("evidence")) {
+    return "Verify clinical capability before routing referrals";
+  }
+  if (issue.includes("tag")) return "Route this review slice to the right field owner";
+  return action.primary_action || "Review evidence and decide next step";
+}
+
+function aggregatePlannerGeography(rows = []) {
+  const groups = new Map();
+  rows.forEach((row) => {
+    const state = row.address_stateOrRegion || "Unknown state";
+    const city = row.address_city || "Unknown city";
+    const key = `${state}||${city}`;
+    const current = groups.get(key) || {
+      state,
+      city,
+      facilities: 0,
+      sparse: 0,
+      clustered: 0,
+      flags: new Set(),
+    };
+    const flags = String(row.readiness_flags || "").toLowerCase();
+    current.facilities += 1;
+    if (flags.includes("missing") || flags.includes("sparse")) current.sparse += 1;
+    if (flags.includes("cluster")) current.clustered += 1;
+    String(row.readiness_flags || "")
+      .split(",")
+      .map((flag) => flag.trim())
+      .filter(Boolean)
+      .forEach((flag) => current.flags.add(flag));
+    groups.set(key, current);
+  });
+
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      riskSignal: group.sparse + group.clustered,
+      flags: [...group.flags].slice(0, 3).join(", ") || "ok",
+    }))
+    .sort((left, right) => right.riskSignal - left.riskSignal || right.facilities - left.facilities)
+    .slice(0, 6);
+}
+
+function NGOPlanner({ state, onActionJump }) {
+  const profile = state.run.profile || {};
+  const actions = state.run.actions || [];
+  const risks = state.run.risks || [];
+  const components = profile.score_components || {};
+  const openActions = actions.filter((action) => !["Approved", "Applied", "Rejected"].includes(action.status));
+  const humanReviewCount = openActions.filter((action) => inferredQueue(action) === "Human review").length;
+  const evidenceCount = openActions.filter((action) => inferredQueue(action) === "Evidence review" || String(action.issue_type || "").toLowerCase().includes("evidence")).length;
+  const locationCount = openActions.filter((action) => String(action.issue_type || "").toLowerCase().includes("location")).length;
+  const duplicateCount = openActions.filter((action) => String(action.issue_type || "").toLowerCase().includes("duplicate")).length;
+  const planningConfidence = confidenceLabel(profile.consistency_score);
+  const missionFocus = (profile.tags || []).slice(0, 2).join(" + ") || "Maternal + emergency access";
+  const priorityRisks = [...risks]
+    .sort((left, right) => priorityWeight(right.priority) - priorityWeight(left.priority))
+    .slice(0, 5);
+  const fieldTasks = [...openActions]
+    .sort((left, right) => priorityWeight(right.priority) - priorityWeight(left.priority))
+    .slice(0, 6)
+    .map((action) => ({
+      ...action,
+      field_task: plannerTaskLabel(action),
+      planner_queue: inferredQueue(action),
+    }));
+  const geographyRows = aggregatePlannerGeography(state.preview || []);
+
+  return (
+    <section className="ngo-planner">
+      <div className="planner-hero">
+        <div>
+          <span className="planner-kicker">NGO field planning view</span>
+          <h2>Where should the team act next?</h2>
+          <p>
+            Prioritize districts, field verification, and outreach decisions while keeping data trust visible before resources move.
+          </p>
+        </div>
+        <div className="planner-mission">
+          <span>Mission focus</span>
+          <b>{missionFocus}</b>
+          <small>{state.catalog}.{state.schema}.{state.table}</small>
+        </div>
+      </div>
+
+      <div className="metric-grid planner-metrics">
+        <Metric label="Planning confidence" value={planningConfidence} detail={`${profile.consistency_score}% data consistency`} tone={planningConfidence === "Low" ? "risk" : "warn"} />
+        <Metric label="Field actions" value={openActions.length.toLocaleString()} detail="open planner tasks" onClick={() => onActionJump({ queue: "All", status: "All", owner: "All" })} />
+        <Metric label="Review blockers" value={humanReviewCount.toLocaleString()} detail="human proof/reject" tone="risk" onClick={() => onActionJump({ queue: "Human review", status: "All", owner: "Human" })} />
+        <Metric label="Priority risks" value={risks.length.toLocaleString()} detail="trusted-state planning signals" />
+      </div>
+
+      <div className="planner-grid">
+        <div className="panel planner-priorities">
+          <div className="panel-head">
+            <div>
+              <h2>Priority Locations</h2>
+              <p>Coverage and care-gap signals to inspect before deploying field capacity.</p>
+            </div>
+          </div>
+          {priorityRisks.length ? (
+            <div className="priority-stack">
+              {priorityRisks.map((risk) => (
+                <div className="priority-card" key={`${risk.location}-${risk.care_need}`}>
+                  <div>
+                    <span className={`queue-chip priority-${String(risk.priority || "medium").toLowerCase()}`}>{risk.priority || "Priority"}</span>
+                    <h3>{risk.location}, {risk.state}</h3>
+                    <p>{risk.care_need}</p>
+                  </div>
+                  <p>{risk.why}</p>
+                  <small>{risk.look_at}</small>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="helper-text">No risk recommendations yet. Run analysis or inspect the current geography signals below.</p>
+          )}
+        </div>
+
+        <div className="panel planner-trust">
+          <div className="panel-head">
+            <div>
+              <h2>Trust Before Deployment</h2>
+              <p>Data issues translated into planning consequences.</p>
+            </div>
+          </div>
+          <div className="trust-list">
+            <button onClick={() => onActionJump({ issue: "Duplicate cluster", status: "All", owner: "All" })}>
+              <b>{duplicateCount.toLocaleString()}</b>
+              <span>Duplicate reviews may change facility counts.</span>
+            </button>
+            <button onClick={() => onActionJump({ issue: "Location quality", status: "All", owner: "All" })}>
+              <b>{locationCount.toLocaleString()}</b>
+              <span>Location fixes prevent false medical-desert signals.</span>
+            </button>
+            <button onClick={() => onActionJump({ queue: "Evidence review", status: "All", owner: "All" })}>
+              <b>{evidenceCount.toLocaleString()}</b>
+              <span>Capability claims need proof before referrals.</span>
+            </button>
+          </div>
+          <div className="score-list planner-score-list">
+            {["Completeness", "Location quality", "Evidence quality", "Dedupe health"].map((label) => (
+              <ScoreBar key={label} label={label} value={components[label] || 0} />
+            ))}
+          </div>
+        </div>
+
+        <div className="panel full">
+          <div className="panel-head">
+            <div>
+              <h2>Field Actions</h2>
+              <p>Planner-language tasks generated from the current proof/reject queue.</p>
+            </div>
+            <button className="primary" onClick={() => onActionJump({ queue: "All", status: "All", owner: "All" })}>Open full queue</button>
+          </div>
+          <DataTable
+            rows={fieldTasks}
+            columns={[
+              { key: "priority", label: "Priority" },
+              { key: "planner_queue", label: "Queue" },
+              { key: "field_task", label: "Field task" },
+              { key: "recommendation", label: "Evidence source" },
+              { key: "assignee", label: "Assignee", render: (row) => row.assignee || row.owner || "Planner" },
+              { key: "confidence", label: "Confidence" },
+            ]}
+          />
+        </div>
+
+        <div className="panel full">
+          <div className="panel-head">
+            <div>
+              <h2>Geography Watchlist</h2>
+              <p>Preview locations where sparse fields or duplicate clusters may distort outreach planning.</p>
+            </div>
+          </div>
+          <DataTable
+            rows={geographyRows}
+            columns={[
+              { key: "state", label: "State" },
+              { key: "city", label: "City" },
+              { key: "facilities", label: "Preview facilities" },
+              { key: "sparse", label: "Sparse rows" },
+              { key: "clustered", label: "Clustered rows" },
+              { key: "flags", label: "Signals" },
+            ]}
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function tabBadgeCounts(state, pipeline) {
   const profile = state.run.profile || {};
   const actions = state.run.actions || [];
@@ -813,6 +1227,7 @@ function tabBadgeCounts(state, pipeline) {
 
   return {
     "Current State": driverCount,
+    "NGO Planner": risks.length || reviewQueueCount,
     "Import + Pipeline": importPipelineCount,
     Actions: openActions,
     "Risk Recommendations": risks.length
@@ -993,7 +1408,7 @@ function ActionsQueue({ state, onDecision, focus }) {
       </div>
 
       <div className="panel full detail-panel" ref={detailRef} tabIndex="-1">
-        <div>
+        <div className="selected-action-column">
           <h2>Selected Action</h2>
           {selected ? (
             <>
@@ -1012,7 +1427,10 @@ function ActionsQueue({ state, onDecision, focus }) {
                 <dd>{selected.confidence}</dd>
                 <dt>Lift</dt>
                 <dd>{selected.lift_points} pts</dd>
+                <dt>Audit effect</dt>
+                <dd>{selected.audit_effect || "Decision is saved to the action audit log."}</dd>
               </dl>
+              <ActionWorkspace action={selected} note={note} setNote={setNote} />
             </>
           ) : (
             <p>Select an action to review evidence.</p>
@@ -1312,6 +1730,7 @@ function App() {
           onActionJump={jumpToActions}
         />
       ) : null}
+      {activeTab === "NGO Planner" ? <NGOPlanner state={state} onActionJump={jumpToActions} /> : null}
       {activeTab === "Import + Pipeline" ? (
         <ImportPipeline
           scratchpad={scratchpad}
@@ -1330,4 +1749,7 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+const rootElement = document.getElementById("root");
+const root = window.__DATA_READINESS_ROOT__ || createRoot(rootElement);
+window.__DATA_READINESS_ROOT__ = root;
+root.render(<App />);

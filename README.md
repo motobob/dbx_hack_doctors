@@ -336,6 +336,8 @@ app/sql/unity_catalog_state.sql
 
 In DBX mode, `/api/state` keeps an in-memory hot state. If Unity Catalog or the SQL warehouse is slow, the app serves cached or warm demo state immediately and refreshes in the background. Use `/api/status` for the cheap cache/backend status and `/api/diagnostics` only when you want explicit catalog/table checks.
 
+Recommended actions are typed work packets, not generic suggestions. See `docs/action-workflow-design.md` for the action payload contract, human review workflows, auto-applied agent action rules, and audit semantics.
+
 ### Sharing the Deployed Databricks App
 
 If a workspace user sees the Databricks `Permission Required` page before the app loads, they need app-level access in Databricks. This happens before FastAPI, React, or app Basic Auth runs.
