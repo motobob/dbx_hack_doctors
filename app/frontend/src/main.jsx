@@ -228,6 +228,211 @@ function ReadinessFlags({ value }) {
   );
 }
 
+function ScorePill({ score }) {
+  const numeric = Number(score || 0);
+  const tone = numeric >= 85 ? "a" : numeric >= 70 ? "b" : numeric >= 50 ? "c" : "d";
+  return <span className={`score-pill score-pill-${tone}`}>{numeric}</span>;
+}
+
+function TierPill({ tier }) {
+  const value = String(tier || "D").toUpperCase();
+  return <span className={`tier-pill tier-pill-${value.toLowerCase()}`}>Tier {value}</span>;
+}
+
+function ReasonCodes({ value }) {
+  const reasons = Array.isArray(value)
+    ? value
+    : String(value || "")
+        .split(",")
+        .map((reason) => reason.trim())
+        .filter(Boolean);
+  if (!reasons.length) return <span className="muted">none</span>;
+  return (
+    <div className="reason-codes">
+      {reasons.slice(0, 3).map((reason) => (
+        <span key={reason}>{reason.replaceAll("_", " ")}</span>
+      ))}
+    </div>
+  );
+}
+
+function ScoreDistribution({ profile }) {
+  const distribution = profile.score_distribution || [];
+  const tierCounts = profile.tier_counts || {};
+  const topReasons = profile.top_reason_codes || [];
+  const total = Math.max(1, Object.values(tierCounts).reduce((sum, value) => sum + Number(value || 0), 0));
+  const maxBin = Math.max(1, ...distribution.map((bin) => Number(bin.count || 0)));
+  return (
+    <div className="score-bi">
+      <div className="score-bi-head">
+        <div>
+          <h2>Row Uncertainty Distribution</h2>
+          <p>Deterministic row scores across the loaded facility set.</p>
+        </div>
+        <Metric
+          label="Avg row score"
+          value={`${profile.row_readiness_avg ?? 0}`}
+          detail={`${Number(profile.row_review_required || 0).toLocaleString()} rows need review`}
+          tone="warn"
+        />
+      </div>
+      <div className="tier-strip" aria-label="Row uncertainty tier distribution">
+        {["A", "B", "C", "D"].map((tier) => {
+          const count = Number(tierCounts[tier] || 0);
+          return (
+            <div className={`tier-segment tier-${tier.toLowerCase()}`} style={{ flexGrow: Math.max(count, 1) }} key={tier}>
+              <span>{tier}</span>
+              <strong>{count.toLocaleString()}</strong>
+              <small>{Math.round((count / total) * 100)}%</small>
+            </div>
+          );
+        })}
+      </div>
+      <div className="score-histogram">
+        {distribution.map((bin) => (
+          <div className="hist-row" key={bin.label}>
+            <span>{bin.label}</span>
+            <div className="hist-track">
+              <div style={{ width: `${Math.max(4, (Number(bin.count || 0) / maxBin) * 100)}%` }} />
+            </div>
+            <strong>{Number(bin.count || 0).toLocaleString()}</strong>
+          </div>
+        ))}
+      </div>
+      <div className="reason-cloud">
+        {topReasons.length ? topReasons.map((item) => (
+          <span key={item.reason}>
+            {String(item.reason).replaceAll("_", " ")} <b>{Number(item.count || 0).toLocaleString()}</b>
+          </span>
+        )) : <span>No major reason codes.</span>}
+      </div>
+    </div>
+  );
+}
+
+function tierColor(tier) {
+  const value = String(tier || "D").toUpperCase();
+  if (value === "A") return "#00a972";
+  if (value === "B") return "#2272b4";
+  if (value === "C") return "#ffab00";
+  return "#98102a";
+}
+
+function IndiaScoreMap({ points = [] }) {
+  const width = 720;
+  const height = 520;
+  const lonMin = 68;
+  const lonMax = 98;
+  const latMin = 8;
+  const latMax = 37;
+  const validPoints = points.filter((point) =>
+    Number.isFinite(Number(point.lat)) &&
+    Number.isFinite(Number(point.lon)) &&
+    Number(point.lat) >= latMin &&
+    Number(point.lat) <= latMax &&
+    Number(point.lon) >= lonMin &&
+    Number(point.lon) <= lonMax
+  );
+  const tierCounts = validPoints.reduce((acc, point) => {
+    const tier = String(point.tier || "D").toUpperCase();
+    acc[tier] = (acc[tier] || 0) + 1;
+    return acc;
+  }, { A: 0, B: 0, C: 0, D: 0 });
+
+  function project(lon, lat) {
+    return {
+      x: ((Number(lon) - lonMin) / (lonMax - lonMin)) * width,
+      y: ((latMax - Number(lat)) / (latMax - latMin)) * height,
+    };
+  }
+
+  const outlineCoords = [
+    [68.2, 23.8], [69.3, 22.2], [70.2, 21.2], [72.0, 20.0], [72.8, 18.8],
+    [73.2, 16.5], [74.0, 14.5], [74.8, 12.5], [76.2, 9.1], [77.4, 8.2],
+    [78.8, 9.8], [79.8, 11.5], [80.3, 13.5], [80.0, 15.8], [81.3, 17.5],
+    [82.8, 19.0], [84.2, 20.5], [86.2, 21.7], [88.2, 21.8], [89.7, 22.8],
+    [91.5, 24.4], [93.0, 25.5], [94.8, 26.6], [95.7, 28.0], [95.0, 29.5],
+    [93.8, 29.0], [92.2, 27.5], [90.4, 26.5], [88.8, 26.8], [88.0, 27.7],
+    [86.8, 27.9], [85.3, 27.0], [83.7, 27.7], [82.2, 29.2], [80.1, 30.5],
+    [78.5, 32.2], [76.8, 34.2], [75.3, 34.8], [74.2, 33.5], [73.2, 31.6],
+    [72.0, 29.0], [70.5, 26.8], [68.9, 24.8], [68.2, 23.8],
+  ];
+  const outline = outlineCoords.map(([lon, lat]) => {
+    const { x, y } = project(lon, lat);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+
+  const plotted = [...validPoints].sort((left, right) => Number(right.score || 0) - Number(left.score || 0));
+
+  return (
+    <div className="india-map-card">
+      <div className="score-bi-head">
+        <div>
+          <h2>Geographic Score Heatmap</h2>
+          <p>Facility lat/lon plotted over India bounds, colored by row uncertainty tier.</p>
+        </div>
+        <Metric
+          label="Mapped rows"
+          value={validPoints.length.toLocaleString()}
+          detail={`${Number(tierCounts.C + tierCounts.D).toLocaleString()} C/D rows`}
+          tone="risk"
+        />
+      </div>
+      <div className="map-wrap">
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="India latitude longitude score heatmap">
+          <defs>
+            <filter id="heat-glow">
+              <feGaussianBlur stdDeviation="4" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+          {[70, 75, 80, 85, 90, 95].map((lon) => {
+            const { x } = project(lon, latMin);
+            return <line className="map-grid" x1={x} x2={x} y1="0" y2={height} key={`lon-${lon}`} />;
+          })}
+          {[10, 15, 20, 25, 30, 35].map((lat) => {
+            const { y } = project(lonMin, lat);
+            return <line className="map-grid" x1="0" x2={width} y1={y} y2={y} key={`lat-${lat}`} />;
+          })}
+          <polygon className="india-outline" points={outline} />
+          {plotted.map((point, index) => {
+            const { x, y } = project(point.lon, point.lat);
+            const tier = String(point.tier || "D").toUpperCase();
+            const radius = tier === "D" ? 7 : tier === "C" ? 6 : 4;
+            const opacity = tier === "A" ? 0.26 : tier === "B" ? 0.34 : tier === "C" ? 0.52 : 0.62;
+            const label = `${point.name || "Facility"} · ${point.city || ""} ${point.state || ""} · score ${point.score} · tier ${tier}`;
+            return (
+              <circle
+                className={`map-point map-point-${tier.toLowerCase()}`}
+                cx={x}
+                cy={y}
+                r={radius}
+                fill={tierColor(tier)}
+                opacity={opacity}
+                filter={tier === "C" || tier === "D" ? "url(#heat-glow)" : undefined}
+                key={`${point.lat}-${point.lon}-${index}`}
+              >
+                <title>{label}</title>
+              </circle>
+            );
+          })}
+        </svg>
+      </div>
+      <div className="map-legend">
+        {["A", "B", "C", "D"].map((tier) => (
+          <span key={tier}>
+            <i style={{ background: tierColor(tier) }} />
+            Tier {tier} <b>{Number(tierCounts[tier] || 0).toLocaleString()}</b>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CurrentState({ state, onActionJump }) {
   const profile = state.run.profile;
   const actions = state.run.actions || [];
@@ -238,10 +443,13 @@ function CurrentState({ state, onActionJump }) {
   )).length;
   const previewColumns = [
     { key: "name", label: "Facility" },
+    { key: "row_readiness_score", label: "Score", render: (row) => <ScorePill score={row.row_readiness_score} /> },
+    { key: "row_uncertainty_tier", label: "Tier", render: (row) => <TierPill tier={row.row_uncertainty_tier} /> },
     { key: "address_city", label: "City" },
     { key: "address_stateOrRegion", label: "State" },
     { key: "address_zipOrPostcode", label: "PIN" },
     { key: "organization_type", label: "Type" },
+    { key: "row_reason_codes", label: "Top reasons", render: (row) => <ReasonCodes value={row.row_reason_codes} /> },
     { key: "readiness_flags", label: "Readiness flags", render: (row) => <ReadinessFlags value={row.readiness_flags} /> }
   ];
   const [previewSearch, setPreviewSearch] = useState("");
@@ -418,6 +626,14 @@ function CurrentState({ state, onActionJump }) {
             Clinical claims need evidence before planners trust them.
           </button>
         </div>
+      </div>
+
+      <div className="panel full">
+        <ScoreDistribution profile={profile} />
+      </div>
+
+      <div className="panel full">
+        <IndiaScoreMap points={state.map_points || []} />
       </div>
 
       <div className="panel full">
