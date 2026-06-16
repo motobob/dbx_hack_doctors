@@ -25,7 +25,7 @@ env:
   - name: "APP_STATE_LOAD_TIMEOUT_SECONDS"
     value: "45"
   - name: "APP_STATE_FALLBACK_ON_ERROR"
-    value: "false"
+    value: "true"
   - name: "APP_STATE_CACHE_PREWARM"
     value: "true"
   - name: "DATABRICKS_SQL_USE_CLOUD_FETCH"
