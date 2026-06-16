@@ -7,6 +7,7 @@ from typing import Any
 
 import pandas as pd
 
+from .scoring import score_facilities_v2 as score_facilities, score_summary
 from .store import now_iso, save_last_run
 
 
@@ -23,6 +24,14 @@ CAPABILITY_TERMS = {
 
 def _not_blank(series: pd.Series) -> pd.Series:
     return series.fillna("").astype(str).str.strip().ne("")
+
+
+def _text_or_empty(value: Any) -> str:
+    if value is None:
+        return ""
+    if pd.isna(value):
+        return ""
+    return str(value).strip()
 
 
 def _contains_any(row: pd.Series, terms: list[str]) -> bool:
@@ -81,6 +90,9 @@ def profile_dataset(df: pd.DataFrame, scratchpad: str) -> dict[str, Any]:
     suspicious_claims = max(0, int(text_claim_rows * 0.08))
     contradiction_score = max(0.35, 1 - suspicious_claims / max(row_count, 1))
 
+    row_scores = score_facilities(df)
+    row_score_summary = score_summary(row_scores)
+
     components = {
         "Completeness": round(completeness * 100),
         "Dedupe health": round(duplicate_health * 100),
@@ -119,6 +131,8 @@ def profile_dataset(df: pd.DataFrame, scratchpad: str) -> dict[str, Any]:
         "human_review_queue": review_queue_estimate,
         "sparse_locations": sparse_locations,
         "suspicious_claims": suspicious_claims,
+        "row_scorer_version": "row_scorer_v2",
+        **row_score_summary,
         "score_components": components,
         "tags": extract_tags(scratchpad),
     }
@@ -128,9 +142,13 @@ def annotate_preview(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
     preview = df.head(300).copy()
+    scores = score_facilities(preview)
+    preview = pd.concat([preview, scores], axis=1)
     flags: list[str] = []
     for _, row in preview.iterrows():
         row_flags = []
+        if row.get("row_uncertainty_tier") in {"C", "D"}:
+            row_flags.append(f"tier {row.get('row_uncertainty_tier')}")
         if not str(row.get("address_zipOrPostcode", "") or "").strip():
             row_flags.append("missing PIN")
         if not str(row.get("address_stateOrRegion", "") or "").strip():
@@ -148,6 +166,9 @@ def annotate_preview(df: pd.DataFrame) -> pd.DataFrame:
         "address_zipOrPostcode",
         "organization_type",
         "specialties",
+        "row_readiness_score",
+        "row_uncertainty_tier",
+        "row_reason_codes",
         "readiness_flags",
     ]
     return preview[[col for col in cols if col in preview.columns]]
@@ -348,6 +369,92 @@ def auto_agent_payload(kind: str, title: str, rows_scored: int, rules: list[str]
     }
 
 
+def row_uncertainty_payload(df: pd.DataFrame) -> dict[str, Any]:
+    if df.empty:
+        records = []
+        reason_items = []
+    else:
+        preview = df.head(300).copy()
+        scores = score_facilities(preview)
+        scored = pd.concat([preview, scores], axis=1)
+        queue = scored[
+            scored["row_review_required"].eq(True)
+            | scored["row_uncertainty_tier"].isin(["C", "D"])
+        ].sort_values("row_readiness_score", ascending=True)
+        records = [_row_snapshot(row) for _, row in queue.head(5).iterrows()]
+        for record, (_, row) in zip(records, queue.head(5).iterrows(), strict=False):
+            record["row_readiness_score"] = _clean_value(row.get("row_readiness_score"))
+            record["row_uncertainty_tier"] = _clean_value(row.get("row_uncertainty_tier"))
+            record["row_reason_codes"] = _clean_value(row.get("row_reason_codes"))
+        reason_counts = Counter(reason for reasons in scored["row_reason_codes"] for reason in reasons)
+        reason_items = [
+            {"label": reason.replace("_", " "), "value": str(count), "tone": "high" if idx < 3 else "medium"}
+            for idx, (reason, count) in enumerate(reason_counts.most_common(5))
+        ]
+
+    return {
+        "action_kind": "row_uncertainty_review",
+        "workflow": "trust_map_review",
+        "records": records,
+        "proposed_result": {
+            "rows_sampled": len(records),
+            "review_basis": "C/D tiers plus blocking reason codes",
+            "planning_effect": "exclude or steward weak rows before capacity and care-gap planning",
+        },
+        "evidence_items": reason_items
+        or [
+            {"label": "Reason codes", "value": "none found", "tone": "medium"},
+            {"label": "Review basis", "value": "row scorer v2", "tone": "medium"},
+        ],
+        "audit_effect": "Review decisions record whether weak rows can count in planning, need steward repair, or should stay excluded from trusted maps.",
+    }
+
+
+def build_map_points(df: pd.DataFrame, max_points: int = 3000) -> list[dict[str, Any]]:
+    if df.empty or "latitude" not in df.columns or "longitude" not in df.columns:
+        return []
+    scored = df.copy()
+    scores = score_facilities(scored)
+    scored = pd.concat([scored, scores], axis=1)
+    scored["latitude_num"] = pd.to_numeric(scored["latitude"], errors="coerce")
+    scored["longitude_num"] = pd.to_numeric(scored["longitude"], errors="coerce")
+    valid = scored[
+        scored["latitude_num"].between(8, 37, inclusive="both")
+        & scored["longitude_num"].between(68, 98, inclusive="both")
+    ].copy()
+    if valid.empty:
+        return []
+
+    review = valid[valid["row_review_required"] == True]  # noqa: E712
+    trusted = valid[valid["row_review_required"] != True]  # noqa: E712
+    review_limit = min(len(review), max_points // 2)
+    trusted_limit = max_points - review_limit
+    parts = []
+    if review_limit:
+        parts.append(review.head(review_limit))
+    if trusted_limit:
+        parts.append(trusted.head(trusted_limit))
+    sampled = pd.concat(parts).head(max_points) if parts else valid.head(max_points)
+
+    def row_to_point(row: pd.Series) -> dict[str, Any]:
+        reasons = row.get("row_reason_codes", [])
+        if not isinstance(reasons, list):
+            reasons = []
+        return {
+            "name": _text_or_empty(row.get("name")),
+            "state": _text_or_empty(row.get("address_stateOrRegion")),
+            "city": _text_or_empty(row.get("address_city")),
+            "lat": round(float(row["latitude_num"]), 6),
+            "lon": round(float(row["longitude_num"]), 6),
+            "score": int(row.get("row_readiness_score", 0) or 0),
+            "tier": _text_or_empty(row.get("row_uncertainty_tier")) or "D",
+            "review_required": bool(row.get("row_review_required")),
+            "reasons": reasons[:3],
+        }
+
+    return [row_to_point(row) for _, row in sampled.iterrows()]
+
+
 def enrich_action(action: dict[str, Any]) -> dict[str, Any]:
     issue = action.get("issue_type", "")
     owner = action.get("owner", "")
@@ -362,6 +469,13 @@ def enrich_action(action: dict[str, Any]) -> dict[str, Any]:
         "decision_required": True,
     }
     by_issue = {
+        "Row uncertainty": {
+            "queue": "Human review",
+            "next_step": "Open C/D tier rows, inspect the reason codes, and decide whether they can count in planning.",
+            "primary_action": "Review rows",
+            "secondary_action": "Send to steward",
+            "assignee": "Data steward",
+        },
         "Duplicate cluster": {
             "queue": "Human review",
             "next_step": "Compare clustered rows, choose the winning source fields, then approve or reject the merge.",
@@ -409,7 +523,19 @@ def enrich_action(action: dict[str, Any]) -> dict[str, Any]:
 
 def build_actions(df: pd.DataFrame, profile: dict[str, Any], scratchpad: str) -> pd.DataFrame:
     tags = profile.get("tags", [])
+    review_rows = int(profile.get("row_review_required", 0) or 0)
     actions = [
+        {
+            "priority": "P0",
+            "issue_type": "Row uncertainty",
+            "recommendation": f"Review {review_rows:,} C/D or blocking-rule rows before planning",
+            "owner": "Human",
+            "confidence": "High",
+            "status": "Needs review",
+            "lift_points": min(7.0, round(profile["expected_lift"] * 0.32, 1)),
+            "evidence": "Deterministic row scoring found weak identity, location, capability evidence, dedupe, provenance, or metadata signals.",
+            **row_uncertainty_payload(df),
+        },
         {
             "priority": "P0",
             "issue_type": "Duplicate cluster",
