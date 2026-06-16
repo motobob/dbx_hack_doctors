@@ -99,6 +99,16 @@ def profile_dataset(df: pd.DataFrame, scratchpad: str) -> dict[str, Any]:
     )
     expected_lift = max(6, min(24, round((100 - consistency_score) * 0.38)))
 
+    sparse_locations = int((~(city_ok & state_ok & pin_ok)).sum())
+    review_queue_estimate = sum(
+        [
+            duplicate_clusters > 0,
+            suspicious_claims > 0,
+            sparse_locations > 0,
+            bool(extract_tags(scratchpad)),
+        ]
+    )
+
     return {
         "row_count": row_count,
         "state_count": int(df.get("address_stateOrRegion", pd.Series(dtype=str)).nunique(dropna=True)),
@@ -106,8 +116,8 @@ def profile_dataset(df: pd.DataFrame, scratchpad: str) -> dict[str, Any]:
         "consistency_score": consistency_score,
         "expected_lift": expected_lift,
         "duplicate_clusters": duplicate_clusters,
-        "human_review_queue": int(max(duplicate_clusters, suspicious_claims * 1.8)),
-        "sparse_locations": int((~(city_ok & state_ok & pin_ok)).sum()),
+        "human_review_queue": review_queue_estimate,
+        "sparse_locations": sparse_locations,
         "suspicious_claims": suspicious_claims,
         "score_components": components,
         "tags": extract_tags(scratchpad),

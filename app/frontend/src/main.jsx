@@ -230,7 +230,12 @@ function ReadinessFlags({ value }) {
 
 function CurrentState({ state, onActionJump }) {
   const profile = state.run.profile;
+  const actions = state.run.actions || [];
   const components = profile.score_components || {};
+  const reviewQueueCount = actions.filter((action) => (
+    action.decision_required !== false &&
+    ["Human review", "Evidence review", "Steward triage"].includes(inferredQueue(action))
+  )).length;
   const previewColumns = [
     { key: "name", label: "Facility" },
     { key: "address_city", label: "City" },
@@ -271,12 +276,12 @@ function CurrentState({ state, onActionJump }) {
   const ctaCards = [
     {
       key: "human",
-      title: `Proof/reject ${profile.human_review_queue.toLocaleString()} review item${profile.human_review_queue === 1 ? "" : "s"}`,
-      detail: "Human decisions can change the trusted resulting state and planning counts.",
-      button: "Open human review",
+      title: `Work ${reviewQueueCount.toLocaleString()} priority review item${reviewQueueCount === 1 ? "" : "s"}`,
+      detail: "Curated proof/reject actions only. Raw candidate counts stay behind the agent workflow.",
+      button: "Open review queue",
       tone: "risk",
-      filters: { issue: "All", status: "Needs review", owner: "Human" },
-      show: profile.human_review_queue > 0,
+      filters: { issue: "All", status: "All", owner: "Human" },
+      show: reviewQueueCount > 0,
     },
     {
       key: "dedupe",
@@ -341,11 +346,11 @@ function CurrentState({ state, onActionJump }) {
             onClick={() => onActionJump({ issue: "Duplicate cluster", status: "All", owner: "All" })}
           />
           <Metric
-            label="Human review"
-            value={profile.human_review_queue.toLocaleString()}
-            detail="open human queue"
+            label="Review queue"
+            value={reviewQueueCount.toLocaleString()}
+            detail="curated action items"
             tone="risk"
-            onClick={() => onActionJump({ issue: "All", status: "Needs review", owner: "Human" })}
+            onClick={() => onActionJump({ issue: "All", status: "All", owner: "Human" })}
           />
         </div>
       </div>
@@ -737,12 +742,16 @@ function tabBadgeCounts(state, pipeline) {
   const actions = state.run.actions || [];
   const risks = state.run.risks || [];
   const openActions = actions.filter((action) => !["Approved", "Applied", "Rejected"].includes(action.status)).length;
+  const reviewQueueCount = actions.filter((action) => (
+    action.decision_required !== false &&
+    ["Human review", "Evidence review", "Steward triage"].includes(inferredQueue(action))
+  )).length;
   const driverCount = [
     profile.expected_lift,
     profile.duplicate_clusters,
     profile.sparse_locations,
     profile.suspicious_claims,
-    profile.human_review_queue
+    reviewQueueCount
   ].filter((value) => Number(value || 0) > 0).length;
   const agents = pipeline?.agents || {};
   const runningAgents = Object.values(agents).filter((agent) => ["running", "pending"].includes(agent?.status)).length;
