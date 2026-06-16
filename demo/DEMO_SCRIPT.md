@@ -37,144 +37,108 @@ If Databricks is unavailable, say "This is the offline/local mode against the ch
 
 ## Timed Script
 
-### 0:00-0:15 - Hook
+### 0:00-0:15 - Hook and Nonprofit Problem
 
 Click: **Current State**
 
 Say:
 
-> We built Timesharerer Doctors for Track 4, Data Readiness Desk. The thesis is simple: medical desert planning is only useful if the facility data underneath it can be trusted.
+> The Virtue Foundation's question sounds simple: where are people underserved, and where should scarce medical resources go next?
+> But if facility data is duplicated, weakly located, or over-claims services, a medical desert map can create false confidence at scale.
 
 Fast line:
 
-> This is a trust model, not a completeness model.
+> Our team cleans healthcare data first, so planning is safer second.
 
 Point to:
 
 - facility count
-- readiness score
-- Geographic Score Heatmap
+- data consistency/readiness score
 - review queue count
-- tab badges
+- Geographic Score Heatmap
 
-### 0:15-0:40 - Geographic Trust Map
+### 0:15-0:45 - What Was Wrong With The Data
 
-Point to: **Geographic Score Heatmap**
-
-Say:
-
-> Before we talk about risk, we show where the data itself is trustworthy. This heatmap plots facility rows across India and colors them by row uncertainty tier, so planners can see whether a region has trusted coverage or just noisy records.
-
-Optional phrase from the v2 handoff:
-
-> A row full of data can still be unsafe.
-
-Point to:
-
-- mapped row count
-- 10,000-point cap note
-- C/D row count
-- zoom controls for inspecting dense clusters
-- dense clusters of weak or strong records
-- clickable tier legend that filters Dataset Preview
-- action/risk rings on dots
-
-Fast line:
-
-> The product starts by making uncertainty geographic.
-
-Click a C or D tier legend item, then point to **Dataset Preview**:
-
-> The map is explainable, not decorative. Clicking a tier carries that uncertainty slice down into the underlying rows, and the state filter lets a reviewer isolate the geography behind a cluster.
-
-Click a dot with an action or risk ring:
-
-> Each dot can open the work behind that row. The pill shows the facility, tier, score, reason codes, and links back into cleanup actions or risk recommendations.
-
-### 0:40-1:05 - Mission Control + Row Scores
-
-Point to: **Mission Control** and **Row Uncertainty Distribution**
+Point to: **Geographic Score Heatmap** and **Row Uncertainty Distribution**
 
 Say:
 
-> Mission Control gives the roll-up, but the row distribution tells us how many facilities are trusted enough to count. This replaces generic queues with a real trust map: A/B rows can support planning, while C/D rows become proof or steward work.
+> The Virtue Foundation dataset gives us more than ten thousand facility records across India. Useful, but not planning-ready.
+> We found duplicate names, sparse locations, ambiguous PIN codes, hundreds of state-name variations, invalid fields, weak clinical claims, and conflicting specialties, equipment, procedures, and descriptions.
+
+Click a C or D tier in the heatmap legend, then point to **Dataset Preview**.
+
+Say:
+
+> So the first screen is a trust map, not a completeness dashboard. The point is simple: can this row be trusted enough to count in planning?
 
 Fast line:
 
-> row_scorer_v2 asks whether each row is coherent, evidenced, geospatially plausible, non-duplicative, and safe to count.
+> A row full of data can still be unsafe for planning.
 
-Click one KPI or CTA that jumps toward **Actions**, then return or continue if the app lands there naturally.
-
-Fast line:
-
-> The product starts by making uncertainty visible.
-
-### 1:05-1:40 - Import + Pipeline
+### 0:45-1:20 - Data Operations As Specialized Databricks Agents
 
 Click: **Import + Pipeline**
 
-Upload or point to:
+Say:
 
-```text
-demo/data_readiness_demo_import.xlsx
-```
+> Now we run the readiness pipeline against the current facility dataset. The same issues we saw on the map become data operations: schema alignment, QA profiling, dedupe, evidence checks, geography checks, review routing, and risk synthesis.
+
+Click: **Run analysis**, or point to the latest completed run.
 
 Say:
 
-> Now we stage a messy incoming file. This demo workbook has exact duplicates, near duplicates, sparse locations, weak clinical claims, and suspicious metadata.
+> We packaged those operations as ten specialized Databricks agents. I will not read every agent name here; the important point is that each card owns one step in the trust workflow.
 
-Point to:
-
-- horizontal import bar
-- scratchpad on the left
-- AI Pipeline on the right
-
-Click:
-
-- **Run ingestion** if an upload preview is ready
-- otherwise **Run analysis**
+Point to the pipeline cards.
 
 Say:
 
-> The pipeline does the first pass: ingest, QA, PIN and NFHS context, dedupe, evidence, geography, shortage, review gate, and risk synthesis.
+> The agents do not silently rewrite reality. Safe fixes can apply; ambiguous duplicates, weak claims, suspicious geography, and planning-critical changes escalate.
 
-Point to agent cards as:
+Fast line:
 
-- 01 Ingestion Manager
-- 02 QA Profile
-- 03 PIN Code Ingestion
-- 04 NFHS Survey Ingestion
-- 05 Deduplication
-- 06 Evidence / Claim Verification
-- 07 Geolocation / Coverage
-- 08 Shortage
-- 09 Human Review Gate
-- 10 Risk / Coverage Scoring
+> The output is not just cleaned data. It is reviewable trust.
 
-If a completed run is already visible:
+### 1:20-1:40 - Extremely Concise Architecture
 
-> This completed run shows all ten agents finished cleanly. The green signal cards are raw agent findings, not the curated action or risk counts.
+Stay on: **Import + Pipeline** pipeline panel
 
-### 1:40-2:20 - Actions Queue
+Say:
+
+> Architecturally, this is a Databricks App: React, FastAPI, Unity Catalog for governed state, Databricks SQL for access, and Databricks Jobs for the agent pipeline.
+> The key is separation: raw source data, working agent findings, and the trusted resulting state planners can use.
+
+Fast line:
+
+> That keeps planners from treating raw scraped records as truth.
+
+### 1:40-2:20 - Human Review And Suggested Reconciliation
 
 Click: **Actions**
 
-Say:
-
-> This is the proof/reject queue. Each item has priority, owner, confidence, evidence, and a next step. The agents do not hide uncertainty; they turn it into work.
-
-Click a high-signal item, preferably:
+Select a strong human-review item, ideally:
 
 - duplicate cluster
-- location quality
-- capability evidence
-- NICU review
+- location cleanup
+- weak capability claim
+- NICU or emergency evidence review
 
 Say:
 
-> If we over-count duplicate facilities, we overstate coverage. If we trust a weak capability claim, we may send planners toward the wrong care gap. That is why material decisions land here.
+> This is Data Readiness Desk in action. The agent found a record that should not flow straight into planning.
+> For a duplicate cluster, the reconciliation is to preserve the best canonical row, merge only stronger fields, and keep a reviewer note. For a weak capability claim, confirm evidence before it counts toward coverage.
 
-Add note:
+Point to:
+
+- priority
+- owner
+- confidence
+- evidence
+- proposed result or next step
+- decision note box
+
+Add or reference a note:
 
 ```text
 Demo review: evidence checked; route for steward confirmation. #demo
@@ -184,20 +148,20 @@ Click one decision:
 
 - **Needs review**
 - **Needs more evidence**
-- **Send to review**
-- or **Approve** if the item is clearly safe
+- **Approve**
+- **Reject**
 
 Say:
 
-> The reviewer decision becomes part of the resulting state instead of living in a side spreadsheet.
+> The decision becomes part of the resulting state and audit trail.
 
-### 2:20-2:50 - Risk Recommendations
+### 2:20-2:50 - Data Readiness Desk Enables Medical Desert Planner
 
 Click: **Risk Recommendations**
 
 Say:
 
-> The risk planner is downstream from readiness. It does not just ask where facilities exist. It asks where trusted evidence exists, where evidence is weak, and where sparse data may be creating false confidence.
+> Medical Desert Planner is downstream from readiness. It asks where trusted evidence exists, where evidence is weak, and where sparse or duplicated data may create false confidence.
 
 Click a risk row.
 
@@ -213,21 +177,18 @@ Point to:
 
 Say:
 
-> This is not a passive recommendation table. Each planning signal has facts, a next step, and links back to the cleanup work that must be resolved before anyone treats the gap as real.
+> Each recommendation has facts to verify, a next step, and links back to cleanup work. Planners and stewards share the same trusted state.
 
-Click a linked cleanup action card or **Open cleanup actions** if time allows:
+Fast line:
 
-> The risk recommendation stays connected to the proof/reject queue, so planning and data stewardship are part of the same workflow.
+> Data Readiness Desk is the control plane. Medical Desert Planner is the outcome it makes safer.
 
 ### 2:50-3:00 - Close
 
 Say:
 
-> That is the loop: agents triage messy healthcare data, humans proof the decisions that matter, and the trusted resulting state powers medical desert planning.
-
-Optional slogan close:
-
-> Inspire people to go further and share more.
+> The loop is simple: agents triage messy healthcare data, humans proof the decisions that matter, and Databricks turns approved results into a planning-ready trust layer.
+> Clean healthcare data first. Plan medical desert outreach second.
 
 ## What To Skip If Time Is Tight
 
