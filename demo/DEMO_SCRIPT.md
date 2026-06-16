@@ -1,54 +1,72 @@
 # Three-Minute Demo Script
 
+## Goal
+
+Show one tight loop:
+
+1. raw facility data is not planning-ready
+2. agents triage the data-quality problems
+3. humans proof/reject the material calls
+4. trusted resulting state powers risk recommendations
+
+The demo is three minutes. Do not explain every agent. Show the loop.
+
 ## Before You Start
 
-Use the deployed Databricks App if available. The app should be warm and showing live Unity Catalog data.
+Preferred path:
 
-Expected first-screen signals:
+- Run the deployed Databricks App if it is warm and showing live data.
+- Otherwise run local/offline mode:
 
-- source catalog: `databricks_virtue_foundation_dataset_dais_2026`
-- data state: `Live data`
-- facility count: around `10,000`
-- no persistent `Warming cache`
+```bash
+./run.sh dev local
+```
 
-If the page shows `unknown_catalog` or only 3 preview rows, use the fallback notes at the bottom.
+Open the app and pre-check:
+
+- **Current State** loads.
+- **Import + Pipeline** opens.
+- `demo/data_readiness_demo_import.xlsx` is available.
+- A recent pipeline has completed, or the local pipeline can complete quickly.
+- **Actions** has review items.
+- **Risk Recommendations** has rows.
+
+If Databricks is unavailable, say "This is the offline/local mode against the checked-in dataset; the same app is designed to use Unity Catalog for source/result/audit state."
 
 ## Timed Script
 
-### 0:00-0:20 - Open The Story
+### 0:00-0:15 - Hook
 
 Click: **Current State**
 
 Say:
 
-> We are solving Track 4, Data Readiness Desk, with Track 2 in mind. The idea is that medical desert planning is only useful if the facility data underneath it can be trusted.
+> We built Timesharerer Doctors for Track 4, Data Readiness Desk. The thesis is simple: medical desert planning is only useful if the facility data underneath it can be trusted.
 
 Point to:
 
-- dataset source in the top right
-- live data state
-- current readiness KPI cards
-- top tab notification badges
+- facility count
+- readiness score
+- review queue count
+- tab badges
 
-### 0:20-0:45 - Show The Current Dataset
-
-Say:
-
-> This is the current live dataset from Unity Catalog. We start by showing current consistency, duplicate pressure, human-review volume, and the active drivers that are lowering planning confidence.
-
-Click:
-
-- a top KPI card or notification badge if it has a count
+### 0:15-0:40 - Current State
 
 Say:
 
-> These numbers are not decorative. They route the planner toward the action queue that explains what needs to be fixed.
+> This is the current facility dataset. The app shows duplicate pressure, sparse locations, weak evidence, and the review work that could change planning confidence. These cards are not decorative; they route directly into cleanup work.
 
-### 0:45-1:15 - Import New Messy Data
+Click one KPI or CTA that jumps toward **Actions**, then return or continue if the app lands there naturally.
+
+Fast line:
+
+> The product starts by making uncertainty visible.
+
+### 0:40-1:15 - Import + Pipeline
 
 Click: **Import + Pipeline**
 
-Upload:
+Upload or point to:
 
 ```text
 demo/data_readiness_demo_import.xlsx
@@ -56,118 +74,122 @@ demo/data_readiness_demo_import.xlsx
 
 Say:
 
-> Now we drop in more data. This workbook has 12 demo records with exact duplicates, near duplicates, sparse locations, weak capability claims, and suspicious metadata.
+> Now we stage a messy incoming file. This demo workbook has exact duplicates, near duplicates, sparse locations, weak clinical claims, and suspicious metadata.
+
+Point to:
+
+- horizontal import bar
+- scratchpad on the left
+- AI Pipeline on the right
 
 Click:
 
-- **Run analysis**
+- **Run ingestion** if an upload preview is ready
+- otherwise **Run analysis**
 
 Say:
 
-> Instead of sending this to a human spreadsheet cleanup loop, the Databricks agent workflow takes the first pass.
+> The pipeline does the first pass: ingest, QA, PIN and NFHS context, dedupe, evidence, geography, shortage, review gate, and risk synthesis.
 
-### 1:15-1:45 - Explain The Agents
+If a completed run is already visible:
 
-Point to pipeline cards.
+> This completed run shows all ten agents finished cleanly. The green notifications are review work, not failed tasks.
 
-Say:
-
-> The workflow is ingestion-led. It profiles row quality, detects duplicates, extracts capability evidence, checks geography, estimates shortage signals, and then opens a review gate for the decisions that materially affect planning.
-
-Optional geography line:
-
-> For PIN codes, we are careful: a PIN code is not a district key. The app uses a one-row-per-PIN lookup with confidence and ambiguity flags so facility rows do not fan out or get assigned to the wrong district silently.
-
-Call out expected stages:
-
-- Ingest
-- QA profile
-- De-dup
-- Evidence
-- Geo filter
-- Shortage
-- Review gate
-- Risk synthesis
-
-Say:
-
-> The important bit is that the agents do not hide uncertainty. They turn uncertainty into a review item.
-
-### 1:45-2:25 - Work The Actions Queue
+### 1:15-2:05 - Actions Queue
 
 Click: **Actions**
 
 Say:
 
-> This is the operational proof/reject queue. Every item has a priority, owner, confidence, lift, evidence, and a next step.
+> This is the proof/reject queue. Each item has priority, owner, confidence, evidence, and a next step. The agents do not hide uncertainty; they turn it into work.
 
-Click:
+Click a high-signal item, preferably:
 
-- the duplicate cluster action
+- duplicate cluster
+- location quality
+- capability evidence
+- NICU review
 
 Say:
 
-> For example, this duplicate cluster affects facility counts. If we over-count facilities, we overstate coverage. That is why this lands in the human queue.
+> If we over-count duplicate facilities, we overstate coverage. If we trust a weak capability claim, we may send planners toward the wrong care gap. That is why material decisions land here.
 
-Type into the comment box:
+Add note:
 
 ```text
-Demo review: duplicate evidence checked; route for steward confirmation. #dedupe
+Demo review: evidence checked; route for steward confirmation. #demo
 ```
 
-Click:
+Click one decision:
 
-- **Needs more evidence** or **Send to review**
+- **Needs review**
+- **Needs more evidence**
+- **Send to review**
+- or **Approve** if the item is clearly safe
 
 Say:
 
-> The reviewer decision becomes part of the resulting state, not a side note in a spreadsheet.
+> The reviewer decision becomes part of the resulting state instead of living in a side spreadsheet.
 
-### 2:25-2:50 - Show Risk Recommendations
+### 2:05-2:45 - Risk Recommendations
 
 Click: **Risk Recommendations**
 
 Say:
 
-> The risk planner is downstream from the cleanup. It does not just ask where facilities exist. It asks where trusted evidence exists, where it is weak, and where sparse data may be creating false confidence.
+> The risk planner is downstream from readiness. It does not just ask where facilities exist. It asks where trusted evidence exists, where evidence is weak, and where sparse data may be creating false confidence.
 
-Click:
+Click a risk row.
 
-- a risk row
-- **Open cleanup actions** or **Review evidence queue** if visible
+If visible, click or point to:
 
-Say:
-
-> Risk recommendations link back to the cleanup work, so planners can see whether a care gap is real or whether the data still needs validation.
-
-### 2:50-3:00 - Close
+- **Open cleanup actions**
+- **Open evidence queue**
 
 Say:
 
-> That is the end-to-end loop: agents clean and triage the messy dataset, humans proof the risky calls, and the trusted state powers medical desert planning.
+> Planning recommendations link back to cleanup actions, so the team can tell whether a care gap is real or whether the data still needs validation.
 
-## Fallback Notes
+### 2:45-3:00 - Close
+
+Say:
+
+> That is the loop: agents triage messy healthcare data, humans proof the decisions that matter, and the trusted resulting state powers medical desert planning.
+
+## What To Skip If Time Is Tight
+
+- Do not read the full agent list.
+- Do not explain every score formula.
+- Do not scroll deeply through the dataset preview.
+- Do not wait for a long cloud run; use the latest completed run.
+- Do not open diagnostics unless the app is failing.
+
+## Fallbacks
 
 If upload parsing fails:
 
 - stay on **Import + Pipeline**
 - click **Run analysis**
-- explain that the demo file is represented by the current staged pipeline state
-
-If the deployed app shows fallback data:
-
-- say: "This is the local/fallback state, not the live Unity Catalog state."
-- open `/api/status`, `/api/config`, `/api/state`, and `/api/diagnostics`
-- verify SQL warehouse access, app sharing, Unity Catalog grants, and `DATABRICKS_SQL_USE_CLOUD_FETCH=false`
+- say the demo file is represented by the current staged/local pipeline state
 
 If the pipeline is still running:
 
-- use the latest completed run shown in the header
-- continue to **Actions** and **Risk Recommendations**
+- say "The run is asynchronous; for the judging walkthrough, I will use the latest completed run."
+- continue to **Actions**
+
+If Databricks is down:
+
+- run `./run.sh dev local`
+- say "This is local/offline mode with checked-in data and deterministic agents; Unity Catalog persistence is the cloud target."
+
+If the app shows fallback data:
+
+- say "This is fallback/local state, not live Unity Catalog."
+- do not claim live DBX data
 
 ## Judge One-Liners
 
 - "Track 4 is the product; Track 2 is the outcome."
-- "The system never turns weak evidence into fake certainty."
-- "Agents do the cleanup pass; humans proof the decisions that change planning."
-- "Risk is computed from the resulting trusted state, not from raw scraped claims."
+- "The app never turns weak evidence into fake certainty."
+- "Agents do the first pass; humans proof the calls that change planning."
+- "Risk is computed from trusted resulting state, not raw scraped claims."

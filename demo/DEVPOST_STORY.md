@@ -2,104 +2,117 @@
 
 ## Inspiration
 
-Healthcare planning breaks down when the underlying facility data cannot be trusted. The hackathon dataset has 10,000 messy healthcare facility records across India: duplicate facilities, sparse locations, uneven specialties, free-text capability claims, suspicious metadata, and records that may look useful but are risky to count.
+Healthcare planners cannot make good decisions from data they do not trust.
 
-We were inspired by a simple planning question: before an NGO coordinator or healthcare analyst can decide where care gaps exist, how do they know which facility records are trustworthy enough to use?
+The hackathon dataset gave us more than 10,000 healthcare facility records across India, but the data was not planning-ready. Facility names repeat under slightly different forms. Locations are sparse or inconsistent. PIN codes can be ambiguous. Clinical capabilities may appear only in free text. Specialty fields can disagree with descriptions. A dashboard over that raw data would look useful, but it could easily over-count facilities, trust weak claims, or mistake missing data for a true care gap.
 
-That led us to build for **Track 4: Data Readiness Desk**, with **Track 2: Medical Desert Planner** as the downstream outcome. Our thesis is that medical desert planning is a side effect of trustworthy data readiness. First clean, score, and review the facility evidence; then use the resulting trusted state to reason about risk.
+That shaped our core idea: **medical desert planning should be downstream of data readiness**.
+
+We built Timesharerer Doctors for **Track 4: Data Readiness Desk**, with **Track 2: Medical Desert Planner** as the outcome. Before the app says where care is missing, it asks which records are trustworthy enough to count.
 
 ## What it does
 
-Timesharerer Doctors is a Databricks App that helps a non-technical planner turn messy healthcare facility data into an action queue and a risk-planning view.
+Timesharerer Doctors is a Databricks App that turns messy healthcare facility records into a trusted planning workflow.
 
-The app opens on the current dataset state: live source catalog, facility counts, data consistency, duplicate pressure, human-review volume, and readiness drivers. From there, users can import a new XLS/XLSX/CSV file, run an agent-led pipeline, and see what the system found.
+The app has four main surfaces:
 
-The pipeline produces two outputs:
+- **Current State:** shows the current dataset, live/source status, facility counts, readiness scores, duplicate pressure, sparse locations, and review volume.
+- **Import + Pipeline:** lets a user drag in an XLS, XLSX, or CSV file, preview import readiness, write scratchpad notes, and run the agent pipeline.
+- **Actions:** turns agent findings into an operational proof/reject queue with issue type, owner, confidence, evidence, next step, status, and reviewer notes.
+- **Risk Recommendations:** shows downstream planning risks after the data has been scored, deduped, enriched, and routed through review.
 
-- **Recommendations / Actions:** a proof/reject queue for data stewards, including duplicate clusters, missing locations, weak capability evidence, suspicious claims, and records that need human confirmation.
-- **Risk Recommendations:** downstream planning signals that highlight where care gaps may be real, where confidence is low, and where bad data could be creating false certainty.
-
-The workflow is built around honest uncertainty. The app does not pretend a weak NICU, ICU, emergency, maternity, oncology, trauma, or dialysis claim is automatically true. It surfaces the evidence, confidence, owner, and next step so the planner can approve, reject, or request more evidence.
+The product is designed around honest uncertainty. It does not silently convert a weak NICU, ICU, emergency, maternity, oncology, trauma, or dialysis claim into planning truth. Instead, it asks: what is the evidence, how confident are we, who owns the decision, and what should happen next?
 
 ## How we built it
 
-We built the app as a Databricks App with a React/Vite frontend and a FastAPI backend.
+We built the app as a Databricks App with:
 
-The data architecture separates three states:
+- React and Vite for the frontend
+- FastAPI for the backend
+- Unity Catalog as the intended source/result/audit layer
+- local/offline mode for development and demo resilience
+- a deterministic ten-agent pipeline that can run without LLM calls for repeatable judging demos
 
-- **Source state:** the original Unity Catalog facilities table.
-- **Work state:** imported records, agent outputs, review queues, and scratchpad notes.
+The app separates the workflow into three states:
+
+- **Source state:** immutable source records, usually the Unity Catalog facilities table.
+- **Work state:** uploads, agent outputs, scratchpad notes, and review queues.
 - **Resulting state:** trusted, reviewed data that powers actions and risk recommendations.
 
-The agent workflow is ingestion-led:
+The current pipeline runs ten stages:
 
 ```mermaid
 flowchart LR
-  import[Import or source update] --> ingest[Ingestion Manager]
-  ingest --> qa[QA Profile Agent]
-  qa --> dedupe[Dedup Agent]
-  dedupe --> evidence[Evidence Agent]
-  evidence --> geo[Geo Filter Agent]
-  geo --> shortage[Shortage Agent]
-  shortage --> review[Human Review Gate]
-  review --> risk[Risk Synthesis Agent]
+  start[Import or current source] --> ingest[1 Ingestion Manager]
+  ingest --> qa[2 QA Profile]
+  qa --> pin[3 PIN Lookup]
+  qa --> nfhs[4 NFHS Survey]
+  qa --> dedupe[5 De-dup]
+  qa --> evidence[6 Evidence]
+  pin --> geo[7 Geo Filter]
+  dedupe --> shortage[8 Shortage]
+  evidence --> shortage
+  geo --> shortage
+  nfhs --> shortage
+  shortage --> review[9 Review Gate]
+  review --> risk[10 Risk Synthesis]
 ```
 
-We merged detailed workflow specs into the project so the agents have real operating rules, not just generic labels:
+We grounded the agents in concrete operating rules from project docs:
 
-- `agents/ingestion_agent.md` defines the ingestion orchestrator, cleaning sub-agent, dedupe sub-agent, review surface, and scoring agent.
-- `docs/facilities_data_quality.md` defines concrete rules for scraper corruption, field typing, canonical Indian state mapping, dedupe classes, geocoding, and quality scoring.
-- `agents/pincode_ingestion_agent.md` and `docs/pincode_data_quality.md` define safe PIN-directory enrichment, including the rule that facilities only join to one-row-per-PIN lookup data.
-- `agents/nfhs_survey_ingestion_agent.md` and `docs/nfhs_survey_ingestion_data_quality.md` define NFHS-5 district survey context, including suppression/caution flags and normalized district join keys.
-- `app/lib/agents/SPEC.md` maps those rules into the current ten-agent app workflow.
+- ingestion and review workflow specs in `agents/ingestion_agent.md`
+- facility cleaning, dedupe, geocoding, and scoring rules in `docs/facilities_data_quality.md`
+- PIN-code enrichment rules in `agents/pincode_ingestion_agent.md` and `docs/pincode_data_quality.md`
+- NFHS-5 district survey context rules in `agents/nfhs_survey_ingestion_agent.md` and `docs/nfhs_survey_ingestion_data_quality.md`
+- integrated runtime contracts in `app/lib/agents/SPEC.md`
 
-The app also includes a Markdown scratchpad for planner notes and tags. Those notes can steer the next parse, so the human review context becomes part of the workflow instead of being trapped in a side document.
+We also built a demo import workbook, `demo/data_readiness_demo_import.xlsx`, with intentional duplicates, sparse locations, weak claims, and suspicious metadata so the full workflow can be shown in three minutes.
 
 ## Challenges we ran into
 
-The biggest challenge was making the app reliable inside Databricks Apps while still being rich enough for a demo.
+The hardest product challenge was keeping the app honest. A clean-looking dashboard is easy to make; a trustworthy readiness workflow is harder. We had to design the UI so uncertain records became review work instead of disappearing behind a score.
 
-Locally, everything worked quickly. In the deployed Databricks App, the initial `/api/state` call sometimes hung or fell back to a tiny local demo dataset. We traced that to Databricks SQL connector behavior: cloud fetch was trying to retrieve result chunks from cloud storage URLs that the app runtime could not reach. The fix was to disable SQL cloud fetch, prewarm an in-memory app state cache, increase load timeouts, and prevent silent fallback from masquerading as live data.
+The hardest platform challenge was making the app behave reliably across local development and Databricks Apps. Locally, the app could read checked-in CSV data and run the pipeline quickly. In Databricks, we needed to handle Unity Catalog access, SQL warehouse behavior, app startup latency, and cases where Databricks compute or job runs were unavailable.
 
-We also had to keep the UX honest. It was tempting to show clean-looking numbers, but the real product value is exposing what is uncertain. That led us to make the top-level KPI cards and tab badges clickable, split import/pipeline work from the actions queue, and make every recommendation actionable with status, owner, confidence, evidence, and notes.
+One concrete issue was Databricks SQL cloud fetch. The app runtime could fail when result chunks were fetched from cloud storage URLs, so we disabled cloud fetch, added a state cache, added diagnostics, and made fallback behavior explicit. We also added `./run.sh dev local` so the UI and local deterministic agents remain testable while Databricks credits or workspace jobs are unavailable.
 
-Another challenge was balancing automation with human review. Some issues are safe for agents to fix automatically. Others, like ambiguous duplicate clusters or capability claims that change planning outcomes, must be routed to a human proof/reject queue.
+Another challenge was scope. We wanted to show import, profiling, dedupe, evidence, geography, human review, and planning risk without turning the demo into a maze. The four-tab structure kept the story tight: current state, import/pipeline, actions, risk.
 
 ## Accomplishments that we're proud of
 
-We are proud that the app tells a complete Track 4 to Track 2 story:
+We are proud that Timesharerer Doctors tells a complete Track 4 to Track 2 story:
 
-- It loads the real Unity Catalog dataset in Databricks mode.
+- It starts with messy facility data and makes the quality problems visible.
 - It supports XLS/XLSX/CSV import preview.
-- It runs a ten-agent workflow across facility readiness, PIN geography context, NFHS survey context, and risk synthesis.
-- It surfaces duplicate, location, evidence, shortage, and review-gate signals.
-- It gives users an actionable proof/reject queue instead of a passive report.
-- It turns the trusted resulting state into medical desert risk recommendations.
+- It runs a ten-stage readiness pipeline.
+- It treats PIN-code and NFHS survey context carefully instead of using them as blunt joins.
+- It turns agent findings into an actionable proof/reject queue.
+- It records reviewer decisions and notes as part of the workflow.
+- It links risk recommendations back to cleanup work, so planning output stays tied to evidence.
 
-We are especially proud of the architecture split between source state and resulting state. That makes the product feel like a real data readiness tool, not just a dashboard over raw records.
-
-We also created a demo workbook with intentional duplicates, sparse fields, weak claims, and suspicious metadata so the whole workflow can be demonstrated end to end in three minutes.
+We are especially proud of the human-in-the-loop design. The agents do the first pass, but the app reserves planning-critical calls for proof/reject review. That is the difference between "AI cleaned my spreadsheet" and "my planning dataset is becoming trustworthy."
 
 ## What we learned
 
-We learned that healthcare data readiness is not just about cleaning rows. It is about preserving evidence, communicating uncertainty, and making sure the planning surface does not overstate confidence.
+We learned that data readiness is not just a data-cleaning problem. It is an evidence and trust problem.
 
-We also learned that "agentic" workflows need explicit contracts. The agents became much more meaningful once we documented their rules: what counts as scraper corruption, how dedupe decisions should be classified, how geocoding should be repaired, when humans should intervene, and how scoring should flow into planning risk.
+A facility record can be complete but duplicated. A location can have a PIN code but still be ambiguous. A description can claim a critical service without enough support to plan around it. A medical desert recommendation can be wrong if the system is really seeing sparse data instead of sparse care.
 
-On the Databricks side, we learned that deployment details matter. A dashboard that works locally is not enough; the app needs hot cache behavior, strict source-state rules, diagnostic endpoints, and clear failure modes so a planner never confuses fallback data with the real dataset.
+We also learned that agent workflows need contracts. The useful work came from spelling out the rules: what counts as scraper corruption, when a duplicate is safe to merge, when PIN enrichment is too ambiguous, which NFHS values need caution flags, and which recommendations require a human decision.
+
+On the engineering side, we learned to build for graceful degradation. A hackathon demo should still be inspectable when cloud jobs are paused, credits run out, or a workspace is cold. The local mode became part of the product discipline: the same workflow can be tested offline, while Databricks mode remains the target for source/result/audit persistence.
 
 ## What's next for Timesharerer Doctors
 
-Next, we want to persist every agent output and human decision into Unity Catalog work/result/audit tables. That would turn the current clickable workflow into a fully versioned data readiness system.
+Next, we want to turn the current workflow into a fully persisted readiness system:
 
-We also want to deepen the agents:
+- persist every agent output, recommendation, decision, and audit event into Unity Catalog work/result/audit tables
+- deepen duplicate clustering beyond exact-name matches
+- implement richer capability-evidence extraction from descriptions
+- complete canonical state/district normalization
+- add PIN-code and geocoding repair with confidence tiers
+- materialize NFHS clean/flag/review tables
+- score care-gap recommendations directly from reviewed resulting-state tables
+- support reusable dataset packs so NGOs can bring other healthcare facility datasets, not just the India DAIS dataset
 
-- implement the full canonical state mapping
-- add PIN-code and Nominatim geocoding repair
-- implement NFHS district survey clean/flag/review tables
-- persist duplicate clusters and merge decisions
-- extract evidence snippets from free-text descriptions
-- score capability claims by trust level
-- connect risk recommendations directly to reviewed resulting-state tables
-
-Longer term, Timesharerer Doctors could become a planning cockpit for NGOs and public-health teams: import messy facility data, let agents find the problems, let humans confirm the material decisions, and continuously produce trustworthy care-gap recommendations.
+The long-term vision is a planning cockpit for public-health teams: import messy facility data, let agents find the problems, let humans confirm the material calls, and continuously produce trustworthy care-gap recommendations.
