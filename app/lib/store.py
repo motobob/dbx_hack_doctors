@@ -306,7 +306,27 @@ def save_last_run(payload: dict[str, Any]) -> None:
             """,
         ]
 
+        action_columns = {
+            "state_version_id",
+            "action_id",
+            "priority",
+            "issue_type",
+            "recommendation",
+            "owner",
+            "confidence",
+            "status",
+            "lift_points",
+            "evidence",
+            "created_at",
+            "updated_at",
+        }
         for action in payload.get("actions", []):
+            evidence_payload = {
+                key: value
+                for key, value in action.items()
+                if key not in action_columns
+            }
+            evidence_payload["evidence"] = action.get("evidence", "")
             statements.append(
                 f"""
                 INSERT INTO {actions_table}
@@ -322,15 +342,7 @@ def save_last_run(payload: dict[str, Any]) -> None:
                   {sql_literal(action.get("confidence"))},
                   {sql_literal(action.get("status"))},
                   {sql_literal(action.get("lift_points"))},
-                  {json_literal({
-                      "evidence": action.get("evidence", ""),
-                      "queue": action.get("queue", ""),
-                      "next_step": action.get("next_step", ""),
-                      "primary_action": action.get("primary_action", ""),
-                      "secondary_action": action.get("secondary_action", ""),
-                      "assignee": action.get("assignee", ""),
-                      "decision_required": action.get("decision_required", True),
-                  })},
+                  {json_literal(evidence_payload)},
                   CAST({sql_literal(now)} AS TIMESTAMP),
                   CAST({sql_literal(now)} AS TIMESTAMP)
                 )

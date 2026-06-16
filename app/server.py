@@ -21,7 +21,7 @@ if str(APP_DIR := Path(__file__).resolve().parent) not in sys.path:
 
 from lib.databricks import app_config_summary, fallback_on_state_error, source_table_name, use_unity_catalog_source
 from lib import pipeline as pl
-from lib.reparser import annotate_preview, run_reparse
+from lib.reparser import annotate_preview, build_map_points, run_reparse
 from lib.store import (
     DEFAULT_SCRATCHPAD,
     demo_facilities,
@@ -204,11 +204,13 @@ def _fallback_app_state(reason: str) -> dict[str, Any]:
     run["source_error"] = reason
     run["backend_status"] = "warming"
     preview = annotate_preview(df).head(100).fillna("").to_dict(orient="records")
+    map_points = build_map_points(df)
     catalog, schema, table = _source_label()
     return {
         "scratchpad": scratchpad,
         "run": run,
         "preview": preview,
+        "map_points": map_points,
         "catalog": catalog,
         "schema": schema,
         "table": table,
@@ -251,11 +253,13 @@ def _load_app_state() -> dict[str, Any]:
     else:
         run["backend_status"] = "live"
     preview = annotate_preview(df).head(100).fillna("").to_dict(orient="records")
+    map_points = build_map_points(df)
     catalog, schema, table = _source_label()
     return {
         "scratchpad": scratchpad,
         "run": run,
         "preview": preview,
+        "map_points": map_points,
         "catalog": catalog,
         "schema": schema,
         "table": table,
@@ -384,11 +388,13 @@ def reparse(payload: ScratchpadPayload | None = None) -> dict[str, Any]:
         run["fallback"] = True
         run["source_error"] = f"Could not re-parse from Databricks backend: {type(exc).__name__}: {exc}"
     preview = annotate_preview(df).head(100).fillna("").to_dict(orient="records")
+    map_points = build_map_points(df)
     catalog, schema, table = _source_label()
     next_state = {
         "scratchpad": markdown,
         "run": run,
         "preview": preview,
+        "map_points": map_points,
         "catalog": catalog,
         "schema": schema,
         "table": table,
@@ -396,7 +402,7 @@ def reparse(payload: ScratchpadPayload | None = None) -> dict[str, Any]:
     }
     if _state_cache_enabled():
         _set_cached_state(next_state)
-    return {"scratchpad": markdown, "run": run, "preview": preview}
+    return {"scratchpad": markdown, "run": run, "preview": preview, "map_points": map_points}
 
 
 @app.post("/api/import/preview")

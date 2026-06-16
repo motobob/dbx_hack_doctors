@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "./styles.css";
 
-const tabs = ["Current State", "Import + Pipeline", "Actions", "Risk Recommendations"];
+const tabs = ["Current State", "NGO Planner", "Import + Pipeline", "Actions", "Risk Recommendations"];
 
 const SCORE_DEFINITIONS = {
   "Data consistency":
@@ -228,6 +228,211 @@ function ReadinessFlags({ value }) {
   );
 }
 
+function ScorePill({ score }) {
+  const numeric = Number(score || 0);
+  const tone = numeric >= 85 ? "a" : numeric >= 70 ? "b" : numeric >= 50 ? "c" : "d";
+  return <span className={`score-pill score-pill-${tone}`}>{numeric}</span>;
+}
+
+function TierPill({ tier }) {
+  const value = String(tier || "D").toUpperCase();
+  return <span className={`tier-pill tier-pill-${value.toLowerCase()}`}>Tier {value}</span>;
+}
+
+function ReasonCodes({ value }) {
+  const reasons = Array.isArray(value)
+    ? value
+    : String(value || "")
+        .split(",")
+        .map((reason) => reason.trim())
+        .filter(Boolean);
+  if (!reasons.length) return <span className="muted">none</span>;
+  return (
+    <div className="reason-codes">
+      {reasons.slice(0, 3).map((reason) => (
+        <span key={reason}>{reason.replaceAll("_", " ")}</span>
+      ))}
+    </div>
+  );
+}
+
+function ScoreDistribution({ profile }) {
+  const distribution = profile.score_distribution || [];
+  const tierCounts = profile.tier_counts || {};
+  const topReasons = profile.top_reason_codes || [];
+  const total = Math.max(1, Object.values(tierCounts).reduce((sum, value) => sum + Number(value || 0), 0));
+  const maxBin = Math.max(1, ...distribution.map((bin) => Number(bin.count || 0)));
+  return (
+    <div className="score-bi">
+      <div className="score-bi-head">
+        <div>
+          <h2>Row Uncertainty Distribution</h2>
+          <p>Deterministic row scores across the loaded facility set.</p>
+        </div>
+        <Metric
+          label="Avg row score"
+          value={`${profile.row_readiness_avg ?? 0}`}
+          detail={`${Number(profile.row_review_required || 0).toLocaleString()} rows need review`}
+          tone="warn"
+        />
+      </div>
+      <div className="tier-strip" aria-label="Row uncertainty tier distribution">
+        {["A", "B", "C", "D"].map((tier) => {
+          const count = Number(tierCounts[tier] || 0);
+          return (
+            <div className={`tier-segment tier-${tier.toLowerCase()}`} style={{ flexGrow: Math.max(count, 1) }} key={tier}>
+              <span>{tier}</span>
+              <strong>{count.toLocaleString()}</strong>
+              <small>{Math.round((count / total) * 100)}%</small>
+            </div>
+          );
+        })}
+      </div>
+      <div className="score-histogram">
+        {distribution.map((bin) => (
+          <div className="hist-row" key={bin.label}>
+            <span>{bin.label}</span>
+            <div className="hist-track">
+              <div style={{ width: `${Math.max(4, (Number(bin.count || 0) / maxBin) * 100)}%` }} />
+            </div>
+            <strong>{Number(bin.count || 0).toLocaleString()}</strong>
+          </div>
+        ))}
+      </div>
+      <div className="reason-cloud">
+        {topReasons.length ? topReasons.map((item) => (
+          <span key={item.reason}>
+            {String(item.reason).replaceAll("_", " ")} <b>{Number(item.count || 0).toLocaleString()}</b>
+          </span>
+        )) : <span>No major reason codes.</span>}
+      </div>
+    </div>
+  );
+}
+
+function tierColor(tier) {
+  const value = String(tier || "D").toUpperCase();
+  if (value === "A") return "#00a972";
+  if (value === "B") return "#2272b4";
+  if (value === "C") return "#ffab00";
+  return "#98102a";
+}
+
+function IndiaScoreMap({ points = [] }) {
+  const width = 720;
+  const height = 520;
+  const lonMin = 68;
+  const lonMax = 98;
+  const latMin = 8;
+  const latMax = 37;
+  const validPoints = points.filter((point) =>
+    Number.isFinite(Number(point.lat)) &&
+    Number.isFinite(Number(point.lon)) &&
+    Number(point.lat) >= latMin &&
+    Number(point.lat) <= latMax &&
+    Number(point.lon) >= lonMin &&
+    Number(point.lon) <= lonMax
+  );
+  const tierCounts = validPoints.reduce((acc, point) => {
+    const tier = String(point.tier || "D").toUpperCase();
+    acc[tier] = (acc[tier] || 0) + 1;
+    return acc;
+  }, { A: 0, B: 0, C: 0, D: 0 });
+
+  function project(lon, lat) {
+    return {
+      x: ((Number(lon) - lonMin) / (lonMax - lonMin)) * width,
+      y: ((latMax - Number(lat)) / (latMax - latMin)) * height,
+    };
+  }
+
+  const outlineCoords = [
+    [68.2, 23.8], [69.3, 22.2], [70.2, 21.2], [72.0, 20.0], [72.8, 18.8],
+    [73.2, 16.5], [74.0, 14.5], [74.8, 12.5], [76.2, 9.1], [77.4, 8.2],
+    [78.8, 9.8], [79.8, 11.5], [80.3, 13.5], [80.0, 15.8], [81.3, 17.5],
+    [82.8, 19.0], [84.2, 20.5], [86.2, 21.7], [88.2, 21.8], [89.7, 22.8],
+    [91.5, 24.4], [93.0, 25.5], [94.8, 26.6], [95.7, 28.0], [95.0, 29.5],
+    [93.8, 29.0], [92.2, 27.5], [90.4, 26.5], [88.8, 26.8], [88.0, 27.7],
+    [86.8, 27.9], [85.3, 27.0], [83.7, 27.7], [82.2, 29.2], [80.1, 30.5],
+    [78.5, 32.2], [76.8, 34.2], [75.3, 34.8], [74.2, 33.5], [73.2, 31.6],
+    [72.0, 29.0], [70.5, 26.8], [68.9, 24.8], [68.2, 23.8],
+  ];
+  const outline = outlineCoords.map(([lon, lat]) => {
+    const { x, y } = project(lon, lat);
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+
+  const plotted = [...validPoints].sort((left, right) => Number(right.score || 0) - Number(left.score || 0));
+
+  return (
+    <div className="india-map-card">
+      <div className="score-bi-head">
+        <div>
+          <h2>Geographic Score Heatmap</h2>
+          <p>Facility lat/lon plotted over India bounds, colored by row uncertainty tier.</p>
+        </div>
+        <Metric
+          label="Mapped rows"
+          value={validPoints.length.toLocaleString()}
+          detail={`${Number(tierCounts.C + tierCounts.D).toLocaleString()} C/D rows`}
+          tone="risk"
+        />
+      </div>
+      <div className="map-wrap">
+        <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="India latitude longitude score heatmap">
+          <defs>
+            <filter id="heat-glow">
+              <feGaussianBlur stdDeviation="4" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
+          {[70, 75, 80, 85, 90, 95].map((lon) => {
+            const { x } = project(lon, latMin);
+            return <line className="map-grid" x1={x} x2={x} y1="0" y2={height} key={`lon-${lon}`} />;
+          })}
+          {[10, 15, 20, 25, 30, 35].map((lat) => {
+            const { y } = project(lonMin, lat);
+            return <line className="map-grid" x1="0" x2={width} y1={y} y2={y} key={`lat-${lat}`} />;
+          })}
+          <polygon className="india-outline" points={outline} />
+          {plotted.map((point, index) => {
+            const { x, y } = project(point.lon, point.lat);
+            const tier = String(point.tier || "D").toUpperCase();
+            const radius = tier === "D" ? 7 : tier === "C" ? 6 : 4;
+            const opacity = tier === "A" ? 0.26 : tier === "B" ? 0.34 : tier === "C" ? 0.52 : 0.62;
+            const label = `${point.name || "Facility"} · ${point.city || ""} ${point.state || ""} · score ${point.score} · tier ${tier}`;
+            return (
+              <circle
+                className={`map-point map-point-${tier.toLowerCase()}`}
+                cx={x}
+                cy={y}
+                r={radius}
+                fill={tierColor(tier)}
+                opacity={opacity}
+                filter={tier === "C" || tier === "D" ? "url(#heat-glow)" : undefined}
+                key={`${point.lat}-${point.lon}-${index}`}
+              >
+                <title>{label}</title>
+              </circle>
+            );
+          })}
+        </svg>
+      </div>
+      <div className="map-legend">
+        {["A", "B", "C", "D"].map((tier) => (
+          <span key={tier}>
+            <i style={{ background: tierColor(tier) }} />
+            Tier {tier} <b>{Number(tierCounts[tier] || 0).toLocaleString()}</b>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CurrentState({ state, onActionJump }) {
   const profile = state.run.profile;
   const actions = state.run.actions || [];
@@ -238,10 +443,13 @@ function CurrentState({ state, onActionJump }) {
   )).length;
   const previewColumns = [
     { key: "name", label: "Facility" },
+    { key: "row_readiness_score", label: "Score", render: (row) => <ScorePill score={row.row_readiness_score} /> },
+    { key: "row_uncertainty_tier", label: "Tier", render: (row) => <TierPill tier={row.row_uncertainty_tier} /> },
     { key: "address_city", label: "City" },
     { key: "address_stateOrRegion", label: "State" },
     { key: "address_zipOrPostcode", label: "PIN" },
     { key: "organization_type", label: "Type" },
+    { key: "row_reason_codes", label: "Top reasons", render: (row) => <ReasonCodes value={row.row_reason_codes} /> },
     { key: "readiness_flags", label: "Readiness flags", render: (row) => <ReadinessFlags value={row.readiness_flags} /> }
   ];
   const [previewSearch, setPreviewSearch] = useState("");
@@ -418,6 +626,14 @@ function CurrentState({ state, onActionJump }) {
             Clinical claims need evidence before planners trust them.
           </button>
         </div>
+      </div>
+
+      <div className="panel full">
+        <ScoreDistribution profile={profile} />
+      </div>
+
+      <div className="panel full">
+        <IndiaScoreMap points={state.map_points || []} />
       </div>
 
       <div className="panel full">
@@ -785,6 +1001,420 @@ function actionButtonsFor(action) {
   ];
 }
 
+function ActionEvidenceGrid({ items = [] }) {
+  if (!items.length) return null;
+  return (
+    <div className="evidence-grid">
+      {items.map((item, index) => (
+        <div className={`evidence-card evidence-${item.tone || "medium"}`} key={`${item.label}-${index}`}>
+          <span>{item.label}</span>
+          <b>{item.value}</b>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RecordsComparison({ records = [] }) {
+  if (!records.length) return <p className="helper-text">No row-level records were attached to this action.</p>;
+  const fields = ["name", "address_city", "address_stateOrRegion", "address_zipOrPostcode", "organization_type", "specialties", "source"];
+  return (
+    <div className="comparison-table">
+      <div className="comparison-head">
+        <b>Field</b>
+        {records.map((record, index) => <b key={index}>Record {index + 1}</b>)}
+      </div>
+      {fields.map((field) => (
+        <div className="comparison-row" key={field}>
+          <span>{field}</span>
+          {records.map((record, index) => (
+            <div key={`${field}-${index}`}>{record[field] || <em>blank</em>}</div>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ProposedResult({ result }) {
+  if (!result || Object.keys(result).length === 0) return null;
+  return (
+    <div className="proposed-result">
+      {Object.entries(result).map(([key, value]) => (
+        <div key={key}>
+          <span>{key.replaceAll("_", " ")}</span>
+          <b>{Array.isArray(value) ? value.join(", ") : String(value || "blank")}</b>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function SafeRules({ rules = [] }) {
+  if (!rules.length) return null;
+  return (
+    <div className="rule-list">
+      {rules.map((rule, index) => (
+        <div className="rule-row" key={`${rule.rule}-${index}`}>
+          <b>{rule.rule}</b>
+          <span>{rule.effect}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DuplicateMergeWorkspace({ action, note, setNote }) {
+  const [choices, setChoices] = useState(() => {
+    const initial = {};
+    (action.field_choices || []).forEach((choice) => {
+      initial[choice.field] = choice.recommended_value || "";
+    });
+    return initial;
+  });
+
+  useEffect(() => {
+    const next = {};
+    (action.field_choices || []).forEach((choice) => {
+      next[choice.field] = choice.recommended_value || "";
+    });
+    setChoices(next);
+  }, [action.action_id]);
+
+  function recordChoice(field, value) {
+    const next = { ...choices, [field]: value };
+    setChoices(next);
+    const compact = Object.entries(next)
+      .map(([key, chosen]) => `${key}=${chosen || "blank"}`)
+      .join("; ");
+    setNote(`Merge approved with canonical fields: ${compact}`);
+  }
+
+  return (
+    <div className="action-workspace">
+      <div>
+        <h3>Merge Resolver</h3>
+        <p>Compare the candidate records, choose canonical field values, then approve or reject the merge.</p>
+      </div>
+      <ActionEvidenceGrid items={action.evidence_items} />
+      <RecordsComparison records={action.records} />
+      <div className="field-choice-grid">
+        {(action.field_choices || []).map((choice) => (
+          <label key={choice.field}>
+            <span>{choice.field.replaceAll("_", " ")}</span>
+            <select value={choices[choice.field] || ""} onChange={(event) => recordChoice(choice.field, event.target.value)}>
+              <option value={choice.recommended_value || ""}>{choice.recommended_value || "blank"} · recommended</option>
+              {(choice.alternates || []).map((alternate) => <option key={alternate}>{alternate}</option>)}
+              <option value="">blank / unknown</option>
+            </select>
+          </label>
+        ))}
+      </div>
+      <h3>Proposed Canonical Facility</h3>
+      <ProposedResult result={{ ...(action.proposed_result || {}), ...choices }} />
+    </div>
+  );
+}
+
+function LocationCleanupWorkspace({ action }) {
+  return (
+    <div className="action-workspace">
+      <div>
+        <h3>Geo Cleanup Agent</h3>
+        <p>Safe deterministic rules can be applied immediately; ambiguous geography stays in review.</p>
+      </div>
+      <ActionEvidenceGrid items={action.evidence_items} />
+      <SafeRules rules={action.safe_rules} />
+      <RecordsComparison records={action.records} />
+      <ProposedResult result={action.proposed_result} />
+    </div>
+  );
+}
+
+function CapabilityReviewWorkspace({ action }) {
+  return (
+    <div className="action-workspace">
+      <div>
+        <h3>Evidence Gate</h3>
+        <p>Clinical claims only count for planning after the evidence tests pass.</p>
+      </div>
+      <ActionEvidenceGrid items={action.evidence_items} />
+      <div className="rule-list">
+        {(action.claim_tests || []).map((test, index) => (
+          <div className="rule-row" key={`${test.test}-${index}`}>
+            <b>{test.test}</b>
+            <span>{test.required ? "required for approval" : "optional"}</span>
+          </div>
+        ))}
+      </div>
+      <RecordsComparison records={action.records} />
+    </div>
+  );
+}
+
+function TagTriageWorkspace({ action }) {
+  return (
+    <div className="action-workspace">
+      <div>
+        <h3>Review Slice Builder</h3>
+        <p>Scratchpad tags become steward queues and filters for the next parse run.</p>
+      </div>
+      <ActionEvidenceGrid items={action.evidence_items} />
+      <div className="tag-strip">
+        {(action.tags || []).length ? action.tags.map((tag) => <span className="inline-tag" key={tag}>#{tag}</span>) : <span className="muted-pill">No tags yet</span>}
+      </div>
+      <ProposedResult result={action.proposed_result} />
+    </div>
+  );
+}
+
+function AutoAppliedWorkspace({ action }) {
+  return (
+    <div className="action-workspace auto-applied-workspace">
+      <div>
+        <h3>Auto-Applied Agent Action</h3>
+        <p>{action.agent_result || "This action already applied safe derived metadata."}</p>
+      </div>
+      <ActionEvidenceGrid items={action.evidence_items} />
+      <SafeRules rules={action.safe_rules} />
+      <ProposedResult result={action.proposed_result} />
+    </div>
+  );
+}
+
+function GenericActionWorkspace({ action }) {
+  return (
+    <div className="action-workspace">
+      <ActionEvidenceGrid items={action.evidence_items} />
+      <ProposedResult result={action.proposed_result} />
+    </div>
+  );
+}
+
+function ActionWorkspace({ action, note, setNote }) {
+  if (!action) return <p>Select an action to review evidence.</p>;
+  if (action.action_kind === "duplicate_merge") {
+    return <DuplicateMergeWorkspace action={action} note={note} setNote={setNote} />;
+  }
+  if (action.action_kind === "location_cleanup") return <LocationCleanupWorkspace action={action} />;
+  if (action.action_kind === "capability_review") return <CapabilityReviewWorkspace action={action} />;
+  if (action.action_kind === "tag_triage") return <TagTriageWorkspace action={action} />;
+  if (action.action_kind === "auto_applied") return <AutoAppliedWorkspace action={action} />;
+  return <GenericActionWorkspace action={action} />;
+}
+
+function priorityWeight(priority) {
+  const normalized = String(priority || "").toLowerCase();
+  if (normalized.includes("critical")) return 4;
+  if (normalized.includes("high")) return 3;
+  if (normalized.includes("medium")) return 2;
+  if (normalized.includes("low")) return 1;
+  return 0;
+}
+
+function confidenceLabel(score) {
+  const value = Number(score || 0);
+  if (value >= 80) return "High";
+  if (value >= 65) return "Medium";
+  return "Low";
+}
+
+function plannerTaskLabel(action) {
+  const issue = String(action.issue_type || "").toLowerCase();
+  if (issue.includes("duplicate")) return "Confirm facility count before coverage planning";
+  if (issue.includes("location")) return "Verify location before assigning field outreach";
+  if (issue.includes("nicu") || issue.includes("capability") || issue.includes("evidence")) {
+    return "Verify clinical capability before routing referrals";
+  }
+  if (issue.includes("tag")) return "Route this review slice to the right field owner";
+  return action.primary_action || "Review evidence and decide next step";
+}
+
+function aggregatePlannerGeography(rows = []) {
+  const groups = new Map();
+  rows.forEach((row) => {
+    const state = row.address_stateOrRegion || "Unknown state";
+    const city = row.address_city || "Unknown city";
+    const key = `${state}||${city}`;
+    const current = groups.get(key) || {
+      state,
+      city,
+      facilities: 0,
+      sparse: 0,
+      clustered: 0,
+      flags: new Set(),
+    };
+    const flags = String(row.readiness_flags || "").toLowerCase();
+    current.facilities += 1;
+    if (flags.includes("missing") || flags.includes("sparse")) current.sparse += 1;
+    if (flags.includes("cluster")) current.clustered += 1;
+    String(row.readiness_flags || "")
+      .split(",")
+      .map((flag) => flag.trim())
+      .filter(Boolean)
+      .forEach((flag) => current.flags.add(flag));
+    groups.set(key, current);
+  });
+
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      riskSignal: group.sparse + group.clustered,
+      flags: [...group.flags].slice(0, 3).join(", ") || "ok",
+    }))
+    .sort((left, right) => right.riskSignal - left.riskSignal || right.facilities - left.facilities)
+    .slice(0, 6);
+}
+
+function NGOPlanner({ state, onActionJump }) {
+  const profile = state.run.profile || {};
+  const actions = state.run.actions || [];
+  const risks = state.run.risks || [];
+  const components = profile.score_components || {};
+  const openActions = actions.filter((action) => !["Approved", "Applied", "Rejected"].includes(action.status));
+  const humanReviewCount = openActions.filter((action) => inferredQueue(action) === "Human review").length;
+  const evidenceCount = openActions.filter((action) => inferredQueue(action) === "Evidence review" || String(action.issue_type || "").toLowerCase().includes("evidence")).length;
+  const locationCount = openActions.filter((action) => String(action.issue_type || "").toLowerCase().includes("location")).length;
+  const duplicateCount = openActions.filter((action) => String(action.issue_type || "").toLowerCase().includes("duplicate")).length;
+  const planningConfidence = confidenceLabel(profile.consistency_score);
+  const missionFocus = (profile.tags || []).slice(0, 2).join(" + ") || "Maternal + emergency access";
+  const priorityRisks = [...risks]
+    .sort((left, right) => priorityWeight(right.priority) - priorityWeight(left.priority))
+    .slice(0, 5);
+  const fieldTasks = [...openActions]
+    .sort((left, right) => priorityWeight(right.priority) - priorityWeight(left.priority))
+    .slice(0, 6)
+    .map((action) => ({
+      ...action,
+      field_task: plannerTaskLabel(action),
+      planner_queue: inferredQueue(action),
+    }));
+  const geographyRows = aggregatePlannerGeography(state.preview || []);
+
+  return (
+    <section className="ngo-planner">
+      <div className="planner-hero">
+        <div>
+          <span className="planner-kicker">NGO field planning view</span>
+          <h2>Where should the team act next?</h2>
+          <p>
+            Prioritize districts, field verification, and outreach decisions while keeping data trust visible before resources move.
+          </p>
+        </div>
+        <div className="planner-mission">
+          <span>Mission focus</span>
+          <b>{missionFocus}</b>
+          <small>{state.catalog}.{state.schema}.{state.table}</small>
+        </div>
+      </div>
+
+      <div className="metric-grid planner-metrics">
+        <Metric label="Planning confidence" value={planningConfidence} detail={`${profile.consistency_score}% data consistency`} tone={planningConfidence === "Low" ? "risk" : "warn"} />
+        <Metric label="Field actions" value={openActions.length.toLocaleString()} detail="open planner tasks" onClick={() => onActionJump({ queue: "All", status: "All", owner: "All" })} />
+        <Metric label="Review blockers" value={humanReviewCount.toLocaleString()} detail="human proof/reject" tone="risk" onClick={() => onActionJump({ queue: "Human review", status: "All", owner: "Human" })} />
+        <Metric label="Priority risks" value={risks.length.toLocaleString()} detail="trusted-state planning signals" />
+      </div>
+
+      <div className="planner-grid">
+        <div className="panel planner-priorities">
+          <div className="panel-head">
+            <div>
+              <h2>Priority Locations</h2>
+              <p>Coverage and care-gap signals to inspect before deploying field capacity.</p>
+            </div>
+          </div>
+          {priorityRisks.length ? (
+            <div className="priority-stack">
+              {priorityRisks.map((risk) => (
+                <div className="priority-card" key={`${risk.location}-${risk.care_need}`}>
+                  <div>
+                    <span className={`queue-chip priority-${String(risk.priority || "medium").toLowerCase()}`}>{risk.priority || "Priority"}</span>
+                    <h3>{risk.location}, {risk.state}</h3>
+                    <p>{risk.care_need}</p>
+                  </div>
+                  <p>{risk.why}</p>
+                  <small>{risk.look_at}</small>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="helper-text">No risk recommendations yet. Run analysis or inspect the current geography signals below.</p>
+          )}
+        </div>
+
+        <div className="panel planner-trust">
+          <div className="panel-head">
+            <div>
+              <h2>Trust Before Deployment</h2>
+              <p>Data issues translated into planning consequences.</p>
+            </div>
+          </div>
+          <div className="trust-list">
+            <button onClick={() => onActionJump({ issue: "Duplicate cluster", status: "All", owner: "All" })}>
+              <b>{duplicateCount.toLocaleString()}</b>
+              <span>Duplicate reviews may change facility counts.</span>
+            </button>
+            <button onClick={() => onActionJump({ issue: "Location quality", status: "All", owner: "All" })}>
+              <b>{locationCount.toLocaleString()}</b>
+              <span>Location fixes prevent false medical-desert signals.</span>
+            </button>
+            <button onClick={() => onActionJump({ queue: "Evidence review", status: "All", owner: "All" })}>
+              <b>{evidenceCount.toLocaleString()}</b>
+              <span>Capability claims need proof before referrals.</span>
+            </button>
+          </div>
+          <div className="score-list planner-score-list">
+            {["Completeness", "Location quality", "Evidence quality", "Dedupe health"].map((label) => (
+              <ScoreBar key={label} label={label} value={components[label] || 0} />
+            ))}
+          </div>
+        </div>
+
+        <div className="panel full">
+          <div className="panel-head">
+            <div>
+              <h2>Field Actions</h2>
+              <p>Planner-language tasks generated from the current proof/reject queue.</p>
+            </div>
+            <button className="primary" onClick={() => onActionJump({ queue: "All", status: "All", owner: "All" })}>Open full queue</button>
+          </div>
+          <DataTable
+            rows={fieldTasks}
+            columns={[
+              { key: "priority", label: "Priority" },
+              { key: "planner_queue", label: "Queue" },
+              { key: "field_task", label: "Field task" },
+              { key: "recommendation", label: "Evidence source" },
+              { key: "assignee", label: "Assignee", render: (row) => row.assignee || row.owner || "Planner" },
+              { key: "confidence", label: "Confidence" },
+            ]}
+          />
+        </div>
+
+        <div className="panel full">
+          <div className="panel-head">
+            <div>
+              <h2>Geography Watchlist</h2>
+              <p>Preview locations where sparse fields or duplicate clusters may distort outreach planning.</p>
+            </div>
+          </div>
+          <DataTable
+            rows={geographyRows}
+            columns={[
+              { key: "state", label: "State" },
+              { key: "city", label: "City" },
+              { key: "facilities", label: "Preview facilities" },
+              { key: "sparse", label: "Sparse rows" },
+              { key: "clustered", label: "Clustered rows" },
+              { key: "flags", label: "Signals" },
+            ]}
+          />
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function tabBadgeCounts(state, pipeline) {
   const profile = state.run.profile || {};
   const actions = state.run.actions || [];
@@ -813,6 +1443,7 @@ function tabBadgeCounts(state, pipeline) {
 
   return {
     "Current State": driverCount,
+    "NGO Planner": risks.length || reviewQueueCount,
     "Import + Pipeline": importPipelineCount,
     Actions: openActions,
     "Risk Recommendations": risks.length
@@ -993,7 +1624,7 @@ function ActionsQueue({ state, onDecision, focus }) {
       </div>
 
       <div className="panel full detail-panel" ref={detailRef} tabIndex="-1">
-        <div>
+        <div className="selected-action-column">
           <h2>Selected Action</h2>
           {selected ? (
             <>
@@ -1012,7 +1643,10 @@ function ActionsQueue({ state, onDecision, focus }) {
                 <dd>{selected.confidence}</dd>
                 <dt>Lift</dt>
                 <dd>{selected.lift_points} pts</dd>
+                <dt>Audit effect</dt>
+                <dd>{selected.audit_effect || "Decision is saved to the action audit log."}</dd>
               </dl>
+              <ActionWorkspace action={selected} note={note} setNote={setNote} />
             </>
           ) : (
             <p>Select an action to review evidence.</p>
@@ -1312,6 +1946,7 @@ function App() {
           onActionJump={jumpToActions}
         />
       ) : null}
+      {activeTab === "NGO Planner" ? <NGOPlanner state={state} onActionJump={jumpToActions} /> : null}
       {activeTab === "Import + Pipeline" ? (
         <ImportPipeline
           scratchpad={scratchpad}
@@ -1330,4 +1965,7 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")).render(<App />);
+const rootElement = document.getElementById("root");
+const root = window.__DATA_READINESS_ROOT__ || createRoot(rootElement);
+window.__DATA_READINESS_ROOT__ = root;
+root.render(<App />);
