@@ -20,6 +20,7 @@ if str(APP_DIR := Path(__file__).resolve().parent) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
 from lib.databricks import app_config_summary, fallback_on_state_error, source_table_name, use_unity_catalog_source
+from lib.json_fields import normalize_jsonish_dataframe, normalize_jsonish_records
 from lib import pipeline as pl
 from lib.reparser import annotate_preview, build_map_points, run_reparse
 from lib.store import (
@@ -416,6 +417,7 @@ async def import_preview(file: UploadFile = File(...)) -> dict[str, Any]:
             upload_df = pd.read_excel(io.BytesIO(data))
         else:
             raise HTTPException(status_code=400, detail="Upload must be CSV, XLS, or XLSX.")
+        upload_df = normalize_jsonish_dataframe(upload_df)
     except HTTPException:
         raise
     except Exception as exc:
@@ -444,7 +446,7 @@ async def pipeline_start(payload: PipelineStartPayload | None = None) -> dict[st
     try:
         if payload and payload.mode:
             os.environ["PIPELINE_MODE"] = payload.mode
-        incoming = payload.incoming_records if payload else None
+        incoming = normalize_jsonish_records(payload.incoming_records) if payload else None
         pipeline_id = pl.start_pipeline(incoming_records=incoming)
         return {"pipeline_id": pipeline_id, "status": "started"}
     except Exception as exc:

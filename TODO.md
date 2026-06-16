@@ -24,13 +24,13 @@ Top-level product setting:
 
 - We are solving **Track 4: Data Readiness Desk** with **Track 2: Medical Desert Planner** in mind.
 - The demo promise is: agents ingest and clean messy facility data, humans only proof/reject material findings, and the trusted resulting state produces the downstream risk planner.
-- The three-minute story should show current readiness numbers -> import/stage update -> agent workflow -> proof/reject actions -> risk recommendations.
+- The three-minute story should show Geographic Score Heatmap -> Mission Control + Row Uncertainty Distribution -> import/stage update -> agent workflow -> proof/reject actions -> risk recommendations.
 - MVP confidence is row-level: decide whether a facility row is trusted enough to count in planning. Field-level confidence is a later enhancement for high-value fields only.
 - Future-proof product direction: make the app white-labelable through dataset packs so another country/domain dataset, such as a Zimbabwe healthcare dataset, can reuse the same app shell with different source config, schema mapping, quality rules, agent specs, labels, and score guide.
 
 Core files:
 - `app/server.py`: FastAPI API + static React server. Includes pipeline endpoints.
-- `app/frontend/src/main.jsx`: React app — four tabs, pipeline status panel with agent cards, ingest mode, actionable queue, risk handoff, and readiness-flag chips.
+- `app/frontend/src/main.jsx`: React app — four tabs, heatmap-first Current State, row uncertainty distribution, pipeline status panel with agent cards, ingest mode, actionable queue, risk handoff, and readiness-flag chips.
 - `app/frontend/src/styles.css`: dashboard styling using the agreed Lava/Navy/Oat/Gray/Green/Blue palette, agent cards, queue chips, and preview readiness chips.
 - `app/app.yaml`: Databricks App command and deployment env vars.
 - `app/lib/databricks.py`: Databricks SQL / Unity Catalog helper, auth, config summary, and SQL cloud-fetch control.
@@ -49,6 +49,7 @@ Core files:
 - `docs/nfhs_survey_ingestion_data_quality.md`: NFHS baseline, suppressed/caution cell handling, district join-key rules, and survey-context guardrails.
 - `docs/design-session-2026-06-15-agent-architecture.md`: formatted transcript notes and target ingestion-led architecture.
 - `docs/demo-review-2026-06-15-current-state-import-actions.md`: formatted demo review transcript notes and UX decisions.
+- `docs/agent_workflow_pipeline_v2_lindsay_handoff.md`: Lindsay handoff for the v2 ten-agent trust-first workflow, row_scorer_v2, heatmap language, and product labels.
 - `app/jobs/run_agent.py`: Databricks Job task entrypoint for all ten agents.
 - `app/sql/unity_catalog_state.sql`: Unity Catalog DDL for source, work, result, audit schemas.
 - `app/state/scratchpad.md`: seed Markdown scratchpad.
@@ -84,15 +85,22 @@ Completed/working now:
 - [x] Current app tabs: `Current State`, `Import + Pipeline`, `Actions`, `Risk Recommendations`.
 - [x] Target tab split from demo review implemented: import/scratchpad/pipeline separated from actions.
 - [x] Local downloaded facilities source loads in local mode.
-- [x] Current Dataset KPI cards and score bars.
+- [x] Current State KPI cards and score bars.
 - [x] Markdown scratchpad save and re-parse trigger.
 - [x] Scratchpad View/Edit toggle.
 - [x] Rendered scratchpad view for headings, paragraphs, bullets, and tags.
 - [x] Dataset preview table.
 - [x] Dataset preview search UI.
 - [x] Dataset preview order-by column and asc/desc UI.
+- [x] Dataset preview tier and state filters, with heatmap legend tier clicks driving the preview.
 - [x] Dataset preview labels sample rows against total loaded rows.
 - [x] Dataset preview readiness flags render as colored chips: red missing/sparse, gray clustered, blue-gray ok/neutral.
+- [x] Geographic Score Heatmap appears above Mission Control on Current State.
+- [x] Geographic Score Heatmap has clickable tier legend filters and zoom controls.
+- [x] Geographic Score Heatmap dots open facility pills with score/tier/reasons and links to Actions or Risk Recommendations.
+- [x] Row Uncertainty Distribution replaces the old generic queue card next to Mission Control.
+- [x] Row scorer v2 adds row readiness score, A/B/C/D uncertainty tiers, reason codes, and map points.
+- [x] Lindsay v2 handoff added to docs and reflected in demo/product language.
 - [x] Percentage scores have tooltips/ARIA labels and a demo score guide at `demo/SCORE_GUIDE.md`.
 - [x] Recommendations/actions table with selected action detail.
 - [x] Upload preview API for CSV/XLS/XLSX.
@@ -174,9 +182,10 @@ flowchart LR
 - [ ] **P0 deploy smoke:** hard refresh deployed UI and verify it shows the real source catalog, `Live data`, 10,000 loaded facility records, and no `Warming cache`.
 - [ ] **P0 deploy API smoke:** open deployed `/api/status`, `/api/config`, `/api/state`, and `/api/diagnostics` from an authenticated browser session.
 - [x] **P0 three-minute demo story:** add `demo/DEMO_NARRATIVE.md`, `demo/DEMO_SCRIPT.md`, and `demo/DEMO_CHECKLIST.md`.
-- [ ] **P0 live demo rehearsal:** verify the live app can show current numbers, import/stage, run agents, show proof/reject queue, and show risk recommendations without narration gaps.
+- [ ] **P0 live demo rehearsal:** verify the live app can show heatmap-first Current State, Mission Control, row uncertainty distribution, import/stage, run agents, show proof/reject queue, and show risk recommendations without narration gaps.
 - [x] **P0 tab split:** separate `Import + Pipeline` from `Actions` and keep `Actions` as a dedicated proof/reject work queue.
 - [x] **P0 actionable queue:** add clickable queue lanes, selected-action next steps, status-aware decision buttons, and risk-to-actions handoff.
+- [x] **P0 actionable risk recommendations:** add selected recommendation detail with next step, facts to verify, linked cleanup action cards, and planner note.
 - [x] **P0 DBX data-load fix:** disable SQL cloud fetch, prewarm state cache, increase timeout, and disable silent DBX fallback.
 - [ ] **P1 pipeline persistence:** persist agent outputs from `app/lib/agents/` into Unity Catalog work/result tables.
 - [ ] **P1 white-label dataset packs:** move hardcoded dataset labels/config/rules into pack definitions for India DAIS and future datasets.
@@ -199,6 +208,7 @@ flowchart LR
   - [ ] `Metric.jsx`
   - [ ] `DataTable.jsx`
 - [x] Add table sorting and text search for Dataset Preview.
+- [x] Add Dataset Preview filters for row uncertainty tier and state.
 - [ ] Add table sorting and text search for Recommendations and Risks.
 - [ ] Add pagination or virtual scrolling for dataset preview and action rows.
 - [x] Add visible loading states for action decisions.
@@ -451,8 +461,9 @@ Latest validation:
 - [ ] Add duplicate-adjusted coverage counts.
 - [ ] Add sparse-data penalty.
 - [ ] Add "real gap" versus "data-poor" label.
+- [x] Add action-style selected recommendation detail with facts, next step, and cleanup links.
 - [ ] Add export/save for risk recommendations.
-- [ ] Add map only after coordinate quality is good enough.
+- [x] Link current map dots to related action/risk work when coordinate quality is available.
 
 ## Phase 9: Databricks App Deployment
 

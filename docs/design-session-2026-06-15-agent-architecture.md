@@ -4,6 +4,8 @@ Date: 2026-06-15
 
 Source: user-provided transcript excerpt.
 
+Related handoff: `docs/agent_workflow_pipeline_v2_lindsay_handoff.md` defines the v2 ten-agent trust-first pipeline, `row_scorer_v2`, heatmap language, and product labels.
+
 ## Session Purpose
 
 Review the proposed Databricks Data Readiness Desk architecture and align it with the observed dataset failure modes, the hackathon track strategy, and the agent workflow needed for a credible demo.
@@ -25,6 +27,7 @@ The team framed the posture as:
 - Primary story: make the dataset trustworthy enough for planning.
 - Downstream story: cleaned, trust-weighted records support medical desert gap planning.
 - Product principle: this is a trust layer, not only a cleansing layer.
+- V2 scoring principle: score trust, not only completeness.
 
 ## Top-Level Setting Added After Review
 
@@ -48,7 +51,7 @@ sequenceDiagram
   participant Human as Proof/Reject Gate
   participant Risk as Risk Planner
 
-  Planner->>App: Open current dataset and readiness numbers
+  Planner->>App: Open Current State heatmap and readiness numbers
   Planner->>App: Drop XLS / new scrape / update feed
   App->>Agents: Run ingest, QA, dedupe, evidence, geo, shortage
   Agents->>Human: Produce findings needing proof/reject
@@ -62,6 +65,7 @@ The app should help a non-technical planner answer:
 - Can this facility really provide a claimed service?
 - Which districts or PIN codes appear to lack coverage?
 - Which records are safe enough to count in a planning scenario?
+- Where is row uncertainty geographically concentrated?
 - Which records must be reviewed before they influence resource allocation?
 
 ## Dataset Failure Modes Discussed

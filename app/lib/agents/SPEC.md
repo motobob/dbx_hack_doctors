@@ -6,6 +6,7 @@ The architecture was refined in `docs/design-session-2026-06-15-agent-architectu
 
 The concrete data-quality workflow is now anchored by Sarah's forked agent docs:
 
+- `docs/agent_workflow_pipeline_v2_lindsay_handoff.md`: Lindsay handoff for the v2 ten-agent trust-first pipeline, row_scorer_v2, geographic trust heatmap, demo language, and in-product labels.
 - `agents/ingestion_agent.md`: orchestration prompt, alignment/cleaning sub-agent, dedupe sub-agent, review surface agent, and scoring agent.
 - `docs/facilities_data_quality.md`: field-level cleaning rules, canonical state mapping, dedupe classes, geocoding strategy, and baseline quality findings.
 - `agents/pincode_ingestion_agent.md`: PIN directory orchestrator and sub-agent prompts for safe postal geography enrichment.
@@ -21,6 +22,8 @@ The agent workflow exists to make the Track 4 story demoable in three minutes wh
 
 - Ingest new or updated facility data.
 - Find quality, duplicate, evidence, and location problems automatically.
+- Score facility rows into A/B/C/D uncertainty tiers that feed the Geographic Score Heatmap.
+- Treat row scoring as a trust model: coherent, evidenced, geospatially plausible, non-duplicative, and safe to count in planning.
 - Produce a proof/reject queue instead of asking users to clean rows manually.
 - Commit approved fixes into the trusted resulting state.
 - Generate risk-planning recommendations only from that resulting state.
@@ -29,7 +32,9 @@ The agent workflow exists to make the Track 4 story demoable in three minutes wh
 flowchart LR
   raw[Source state] --> ingest[Ingest]
   ingest --> agents[Agent checks and fixes]
-  agents --> gate[Human proof / reject]
+  agents --> score[Row trust scoring]
+  score --> map[Geographic Score Heatmap]
+  score --> gate[Human proof / reject]
   gate --> resulting[Resulting state]
   resulting --> risk[Risk planner]
 ```

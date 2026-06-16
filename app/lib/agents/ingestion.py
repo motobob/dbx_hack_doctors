@@ -5,6 +5,7 @@ from typing import Any
 
 import pandas as pd
 
+from ..json_fields import normalize_jsonish_dataframe
 from .base import BaseAgent
 
 
@@ -20,7 +21,7 @@ class IngestionManagerAgent(BaseAgent):
 
     def _execute(self, df: pd.DataFrame, upstream: dict[str, Any]) -> dict:
         incoming = upstream.get("incoming_records") or []
-        incoming_df = pd.DataFrame(incoming)
+        incoming_df = normalize_jsonish_dataframe(pd.DataFrame(incoming))
         required = ["name", "address_city", "address_stateOrRegion", "address_zipOrPostcode"]
         source_columns = list(incoming_df.columns if incoming else df.columns)
         present = [column for column in required if column in source_columns]

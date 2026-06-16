@@ -12,18 +12,22 @@ Downstream outcome: **Track 2 - Medical Desert Planner**
 
 We are solving **Track 4** with **Track 2 in mind**. The product story is not "here is another dashboard." It is: messy scraped healthcare data should flow through an agent-led readiness pipeline, with humans only approving or rejecting material findings, and the planning-risk view should emerge as a side effect of making the data trustworthy.
 
+Lindsay's v2 handoff is now the canonical short form for the workflow: ten agents plus `row_scorer_v2`, scoring trust rather than field presence. The scoring question is: is this row coherent, evidenced, geospatially plausible, non-duplicative, and safe to count in planning?
+
 For a three-minute demo, the arc is:
 
-1. Start with the current messy dataset and show that it cannot yet be trusted for planning.
-2. Drop in or stage new data from a file, website scrape, or update feed.
-3. Run the agent pipeline: ingest, QA, dedupe, evidence, geo, shortage, review gate, risk.
-4. Show the system found the problems automatically and separated safe fixes from human-review items.
-5. Show the downstream planning effect: which places, doctors, facilities, or specialties now look risky because the cleaned/trust-weighted data says so.
+1. Start with the Geographic Score Heatmap and show that uncertainty has a location, not just a dashboard number.
+2. Use Mission Control and Row Uncertainty Distribution to explain which rows are trusted enough to count.
+3. Drop in or stage new data from a file, website scrape, or update feed.
+4. Run the agent pipeline: ingest, QA, dedupe, evidence, geo, shortage, review gate, risk.
+5. Show the system found the problems automatically and separated safe fixes from human-review items.
+6. Show the downstream planning effect: which places, doctors, facilities, or specialties now look risky because the cleaned/trust-weighted data says so.
 
 ```mermaid
 flowchart LR
   story[3 minute demo story] --> track4[Track 4: Data Readiness Desk]
-  track4 --> agents[Agent-led data cleanup]
+  track4 --> heatmap[Geographic trust map]
+  heatmap --> agents[Agent-led data cleanup]
   agents --> review[Human proof / reject]
   review --> result[Trusted resulting state]
   result --> track2[Track 2 side effect: risk planner]
@@ -55,6 +59,9 @@ The app answers:
 ## Demo Flow
 
 1. **Open Dashboard**
+   - Show Geographic Score Heatmap first.
+   - Explain that A/B/C/D row tiers determine whether records can count in planning.
+   - Show Mission Control and Row Uncertainty Distribution.
    - Show the current dataset readiness KPI.
    - Example headline: `Current data consistency: 62%`
    - Show estimated improvement after recommended fixes.
@@ -95,14 +102,16 @@ Presenter-ready demo materials now live in `demo/`:
 - `demo/DEMO_NARRATIVE.md`: high-level story and judging frame.
 - `demo/DEMO_SCRIPT.md`: timed click path and speaker notes.
 - `demo/DEMO_CHECKLIST.md`: live-readiness checklist before presenting.
+- `docs/agent_workflow_pipeline_v2_lindsay_handoff.md`: v2 handoff language for the ten-agent trust pipeline, row scorer, and heatmap.
 
 1. "We picked Track 4 because the real blocker is trust: this facility dataset is messy enough that a planner should not use it raw."
-2. "The app opens on the current dataset, current readiness numbers, and the problems dragging planning quality down."
-3. "Now we drop in more data. For the demo, we use `demo/data_readiness_demo_import.xlsx`, a 12-row XLSX with exact duplicates, near duplicates, sparse locations, weak NICU/emergency claims, and suspicious metadata."
-4. "Instead of asking a human to clean rows manually, the Databricks agent workflow does the first pass: ingestion, QA, dedupe, evidence extraction, geo checks, shortage analysis, and a review gate."
-5. "The output is a proof/reject queue: safe fixes can be accepted quickly, risky changes are held for human confirmation, and every item carries evidence and confidence."
-6. "As a side effect of that trusted resulting state, the risk planner shows where care gaps may be real versus where we are just looking at bad or sparse data."
-7. "That is the end-to-end promise: Track 4 cleanup creates the Track 2 planning surface."
+2. "The app opens on a Geographic Score Heatmap, because facility trust has a geography before it becomes a planning recommendation."
+3. "Mission Control gives the roll-up, and Row Uncertainty Distribution shows how many rows are A/B countable versus C/D review work."
+4. "Now we drop in more data. For the demo, we use `demo/data_readiness_demo_import.xlsx`, a 12-row XLSX with exact duplicates, near duplicates, sparse locations, weak NICU/emergency claims, and suspicious metadata."
+5. "Instead of asking a human to clean rows manually, the Databricks agent workflow does the first pass: ingestion, QA, dedupe, evidence extraction, geo checks, shortage analysis, and a review gate."
+6. "The output is a proof/reject queue: safe fixes can be accepted quickly, risky changes are held for human confirmation, and every item carries evidence and confidence."
+7. "As a side effect of that trusted resulting state, the risk planner shows where care gaps may be real versus where we are just looking at bad or sparse data."
+8. "That is the end-to-end promise: Track 4 cleanup creates the Track 2 planning surface."
 
 ## Demo Import Workbook
 
@@ -141,7 +150,7 @@ The app should feel like a Databricks-native operational dashboard: dense, calm,
 - `Actions`
 - `Risk Recommendations`
 
-This keeps the hackathon story clean: first show the current dataset mission control view, then import/stage data and run the cleansing pipeline, then show what the agents found and what needs proof/reject, then show what the cleaned evidence means for planning.
+This keeps the hackathon story clean: first show the Geographic Score Heatmap and Current State trust summary, then import/stage data and run the cleansing pipeline, then show what the agents found and what needs proof/reject, then show what the cleaned evidence means for planning.
 
 Decision note from the 2026-06-15 demo review: import belongs with the current dataset/current state workflow, not inside Actions. Actions should be the prioritized list of what is broken and what the user should approve, reject, comment on, or assign.
 
@@ -191,7 +200,7 @@ Global design rules:
 
 ### Tab 1: Current State Mockup
 
-Purpose: This is the landing page. It shows the current dataset, current numbers, data readiness score, executive summary, and dataset preview before planning.
+Purpose: This is the landing page. It shows the current dataset, Geographic Score Heatmap, current numbers, data readiness score, row uncertainty distribution, executive summary, and dataset preview before planning.
 
 ```text
 +----------------------------------------------------------------------------------+
@@ -202,9 +211,12 @@ Purpose: This is the landing page. It shows the current dataset, current numbers
 | 62%               | +18 pts           | 428               | 1,284 records        |
 | Needs work        | After safe fixes  | 96 high impact    | 312 critical         |
 +-------------------+-------------------+-------------------+----------------------+
+| Geographic Score Heatmap                                                         |
+| up to 10,000 valid mapped rows; colored by A/B/C/D row uncertainty tier           |
++----------------------------------------------------------------------------------+
 | Records 10,000    | States 28         | Districts 612     | Sparse Locations 931 |
 +-------------------+-------------------+-------------------+----------------------+
-| Current Data Stats                                                               |
+| Mission Control                              | Row Uncertainty Distribution       |
 | Completeness 74% | Dedupe Health 51% | Location Quality 68% | Evidence 55%       |
 +----------------------------------------------------------------------------------+
 | Top Drivers of Low Trust                                                         |
@@ -213,7 +225,7 @@ Purpose: This is the landing page. It shows the current dataset, current numbers
 | [bar] Weak capability evidence          19% of penalty                          |
 | [bar] Contradictory specialty claims    14% of penalty                          |
 +----------------------------------------------------------------------------------+
-| Current Dataset Preview                                                          |
+| Dataset Preview                                                                  |
 | facility_name | district | pin_code | specialties       | readiness_flags        |
 | City Care     | Jaipur   | 302001   | ICU, emergency    | possible duplicate     |
 | Shree Mat.    | Jaipur   | blank    | maternity         | weak NICU evidence     |
@@ -233,6 +245,8 @@ Key interactions:
 Implementation notes:
 
 - Use React components for headline KPI cards.
+- Render Geographic Score Heatmap above Mission Control.
+- Render Row Uncertainty Distribution beside Mission Control instead of generic queue copy.
 - Use CSS progress bars for score components.
 - Use a table component for the current dataset preview.
 - Dataset preview is a sample view, not the full dataset table. The UI labels it as "showing N preview rows from 10,000 loaded facility records."
@@ -431,14 +445,16 @@ Purpose: The landing tab. Let a planner understand the current dataset, update s
 
 Widgets:
 
+- Geographic Score Heatmap with up to 10,000 valid India lat/lon rows, C/D row count, clickable A/B/C/D legend, zoom controls, and row-tier colored points.
 - Data consistency KPI.
+- Row Uncertainty Distribution.
 - Estimated KPI lift from recommended fixes.
 - Duplicate cluster count.
 - High-risk records needing review.
 - Sparse geography count.
 - Suspicious capability claim count.
 - Current dataset stats: records, states, districts, sources, last profile run.
-- Dataset preview with readiness flags.
+- Dataset preview with readiness flags plus search, sort, tier filter, and state filter.
 - XLS/XLSX/CSV upload preview.
 - Import readiness and required field checks.
 
@@ -561,6 +577,8 @@ Purpose: Connect Track 4 cleanup to Track 2 planning.
 
 This screen does not pretend the data is perfect. It shows planning recommendations with uncertainty.
 
+Current UI shape: selecting a risk opens an action-style detail panel with a recommendation statement, next step, evidence/facts to verify, linked cleanup action cards, and planner notes. Risk rows and map dot pills must route back to the underlying cleanup queue so planners can see whether a gap is real or data-poor.
+
 Recommendation examples:
 
 - "XYZ district may be underserved for emergency care because trusted emergency evidence is low and facility descriptions are sparse."
@@ -576,6 +594,7 @@ Signals:
 - Location confidence.
 - Distance to nearest trusted facility.
 - Human-review backlog in that geography.
+- Linked cleanup actions for location, evidence, dedupe, and row uncertainty blockers.
 
 ## Readiness KPI
 

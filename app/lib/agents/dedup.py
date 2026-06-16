@@ -21,6 +21,7 @@ from typing import Any
 
 import pandas as pd
 
+from ..json_fields import normalize_jsonish_dataframe
 from .base import BaseAgent
 
 # ── DEDUP prompt ──────────────────────────────────────────────────────────────
@@ -113,7 +114,7 @@ class DedupAgent(BaseAgent):
     # ── ingest mode ───────────────────────────────────────────────────────────
 
     def _run_ingest(self, existing_df: pd.DataFrame, incoming: list[dict]) -> dict:
-        incoming_df = pd.DataFrame(incoming)
+        incoming_df = normalize_jsonish_dataframe(pd.DataFrame(incoming))
         if not self.llm_enabled():
             decisions = []
             existing_names = set(existing_df.get("name", pd.Series(dtype=str)).fillna("").astype(str).str.lower())

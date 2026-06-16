@@ -20,6 +20,7 @@ from .databricks import (
     use_unity_catalog_source,
     use_unity_catalog_state,
 )
+from .json_fields import normalize_jsonish_dataframe
 
 
 APP_DIR = Path(__file__).resolve().parents[1]
@@ -59,7 +60,7 @@ def ensure_state() -> None:
 
 
 def demo_facilities() -> pd.DataFrame:
-    return pd.DataFrame(
+    return normalize_jsonish_dataframe(pd.DataFrame(
         [
             {
                 "unique_id": "demo-1",
@@ -104,7 +105,7 @@ def demo_facilities() -> pd.DataFrame:
                 "source": "sample",
             },
         ]
-    )
+    ))
 
 
 def now_iso() -> str:
@@ -488,10 +489,10 @@ def read_facilities(max_rows: int | None = None) -> pd.DataFrame:
             max_rows = int(os.getenv("APP_SOURCE_ROW_LIMIT", "0") or "0") or None
         if max_rows is not None:
             query += f" LIMIT {int(max_rows)}"
-        return read_sql(query)
+        return normalize_jsonish_dataframe(read_sql(query))
 
     if FACILITIES_CSV.exists():
-        return pd.read_csv(FACILITIES_CSV, nrows=max_rows, low_memory=False)
+        return normalize_jsonish_dataframe(pd.read_csv(FACILITIES_CSV, nrows=max_rows, low_memory=False))
     return demo_facilities()
 
 

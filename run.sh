@@ -147,6 +147,7 @@ ensure_app() {
 
 # ── commands ─────────────────────────────────────────────────────────────────
 run_ui() {
+  load_env
   local ui_port="${UI_PORT:-${APP_UI_PORT:-}}"
   if [ -z "$ui_port" ]; then
     ui_port="$(free_port 5173)"
@@ -162,6 +163,7 @@ run_ui() {
 }
 
 run_api() {
+  load_env
   local api_port="${API_PORT:-${APP_API_PORT:-}}"
   if [ -z "$api_port" ]; then
     api_port="$(free_port 8000)"
@@ -173,6 +175,7 @@ run_api() {
 }
 
 run_dev() {
+  load_env
   local mode="${1:-}"
   local ui_port="${UI_PORT:-${APP_UI_PORT:-}}"
   if [ -z "$ui_port" ]; then
@@ -215,7 +218,11 @@ run_dev() {
   fi
   trap 'kill 0' INT TERM EXIT
   (cd "$FRONTEND_DIR" && npm install --silent && VITE_API_TARGET="$api_target" npm run dev -- --host 127.0.0.1 --port "$ui_port") &
-  (cd "$APP_DIR" && env "${api_env[@]}" "$PYTHON" -m uvicorn server:app --host 0.0.0.0 --port "$api_port" --reload) &
+  if [ "${#api_env[@]}" -gt 0 ]; then
+    (cd "$APP_DIR" && env "${api_env[@]}" "$PYTHON" -m uvicorn server:app --host 0.0.0.0 --port "$api_port" --reload) &
+  else
+    (cd "$APP_DIR" && "$PYTHON" -m uvicorn server:app --host 0.0.0.0 --port "$api_port" --reload) &
+  fi
   wait
 }
 

@@ -24,7 +24,7 @@ flowchart TB
   trusted --> track2[Track 2: medical desert risk output]
 ```
 
-For a three-minute demo, show the full arc quickly: current readiness numbers, import/stage new messy data, run the Databricks agent workflow, review the proof/reject queue, then open the risk planner and show how the cleanup changes planning confidence.
+For a three-minute demo, show the full arc quickly: Geographic Score Heatmap first, Mission Control plus Row Uncertainty Distribution, import/stage new messy data, run the Databricks agent workflow, review the proof/reject queue, then open the risk planner and show how cleanup changes planning confidence.
 
 ### 2. The dataset is noisy in predictable ways, so the pipeline should be structured around those failure modes
 
@@ -102,6 +102,8 @@ To support that, every record and every region should get:
 
 This creates trustworthy decision support rather than just a cleaned CSV.
 
+The v2 Lindsay handoff sharpens this as a trust-first scoring model: `row_scorer_v2` asks whether each row is coherent, evidenced, geospatially plausible, non-duplicative, and safe to count in planning. That language should drive the demo, the heatmap, and the agent review gate.
+
 ### 5. Geolocated specialty coverage is the key downstream bridge to medical desert planning
 
 Your stated output should be:
@@ -150,7 +152,7 @@ Anything beyond that should be treated as stretch.
 
 As of the latest 2026-06-15 build, the app is a Databricks App with a FastAPI backend and React/Vite frontend. The working product surface is four tabs:
 
-- **Current State**: mission-control landing view with data consistency, facility count, duplicate clusters, human review count, score components, scratchpad-derived tags, and a searchable/sortable dataset preview.
+- **Current State**: heatmap-first landing view with row uncertainty plotted geographically, Mission Control KPIs, row uncertainty distribution, scratchpad-derived tags, and a searchable/sortable dataset preview.
 - **Import + Pipeline**: XLS/XLSX/CSV upload preview, Markdown scratchpad View/Edit flow, re-parse trigger, and the ten-agent pipeline status panel.
 - **Actions**: actionable proof/reject work queue with clickable lanes, selected-action next steps, decision notes, and status-aware controls such as approve merge, apply safe fix, reject claim, and needs more evidence.
 - **Risk Recommendations**: Track 2 planning output with evidence-attached risk rows, planning notes, and handoff buttons back into cleanup actions/evidence review.
@@ -167,6 +169,8 @@ flowchart LR
 
 Key UX decisions:
 
+- Geographic Score Heatmap appears above Mission Control so planners see the geography of trust before the roll-up summary.
+- Row Uncertainty Distribution replaces the old generic recommended queue card beside Mission Control.
 - KPI cards are not passive; they navigate into filtered actions.
 - Import and pipeline execution are separate from the Actions tab.
 - Actions are a queue, not just a recommendation table.
@@ -214,6 +218,8 @@ Dataset-specific behavior should move into **dataset packs**:
 - Agent specs and prompt rulebooks.
 - Score definitions and tooltip copy.
 - Demo narrative labels.
+
+Reference: `docs/agent_workflow_pipeline_v2_lindsay_handoff.md` captures the current v2 trust-first agent pipeline, scoring components, heatmap language, and product labels.
 
 This lets the same app support the current India DAIS pack, plus a future Zimbabwe healthcare dataset pack, without rewriting the UI or backend orchestration.
 

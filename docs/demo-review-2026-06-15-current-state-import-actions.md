@@ -4,6 +4,8 @@ Date: 2026-06-15
 
 Source: user-provided transcript excerpt in Codex attachment.
 
+Related handoff: `docs/agent_workflow_pipeline_v2_lindsay_handoff.md` updates the demo language around ten agents, `row_scorer_v2`, and trust-first heatmap scoring.
+
 ## Session Purpose
 
 Review the current Databricks Hackathon app demo and refine what should be shown during a short, judge-facing walkthrough.
@@ -23,21 +25,21 @@ The conversation focused on:
 
 The app story remains:
 
-- **Current State / Dataset**: shows the source dataset, scratchpad, current numbers, preview, and import.
+- **Current State / Dataset**: shows the source dataset, Geographic Score Heatmap, Mission Control, row uncertainty distribution, scratchpad, preview, and import context.
 - **Actions**: solves **Track 4: Data Readiness Desk** by showing what is broken and what should be fixed.
 - **Risk Recommendations**: supports **Track 2: Medical Desert Planner** as the downstream planning output.
 
 ```mermaid
 flowchart LR
-  current[Current State + Import] --> pipeline[Agent workflow]
+  current[Current State heatmap + Import] --> pipeline[Agent workflow]
   pipeline --> actions[Actions / proof-reject queue]
   actions --> trusted[Trusted resulting state]
   trusted --> risk[Risk Recommendations]
 ```
 
-### 2. Import Belongs With Current State
+### 2. Import Belongs With Source-State Workflow
 
-The transcript explicitly calls out that **Import should live with the current dataset**, not inside Actions.
+The transcript explicitly calls out that **Import should live with the source/current-state workflow**, not inside Actions.
 
 Reasoning:
 
@@ -45,13 +47,12 @@ Reasoning:
 - Actions are the list of what the system found broken.
 - Actions should not feel like a generic upload utility; they should feel like a prioritized call to action.
 
-Target tab model:
+Implemented tab model:
 
 1. `Current State`
-2. `Actions`
-3. `Risk Recommendations`
-
-The current app still has `Import + Actions`, so this is now a UX follow-up item.
+2. `Import + Pipeline`
+3. `Actions`
+4. `Risk Recommendations`
 
 ### 3. Scratchpad Feeds Re-Parsing
 
@@ -78,6 +79,8 @@ Decision direction:
 
 - Use an overall dataset confidence/readiness score.
 - Use row-level confidence as the main MVP accounting unit.
+- Show row confidence geographically first, because weak rows have planning impact only once they are placed on the map.
+- Explain row confidence as trust scoring, not simple completeness scoring.
 - Field-level confidence can be a later enhancement only where it supports Track 2 planning decisions.
 
 ### 5. Actions Need Review State, Comments, and Ownership
@@ -137,21 +140,23 @@ This directly led to the repository demo workbook:
 ## Demo Beat Notes
 
 1. Open the current state.
-2. Show overall dataset confidence/readiness.
-3. Show scratchpad and explain it feeds re-parsing.
-4. Show dataset preview with search/filter/sort.
-5. Upload the demo XLSX from the current state workflow.
-6. Trigger the agent pipeline.
-7. Watch ingestion, QA, dedupe, evidence, geo, shortage, review, and risk complete.
-8. Move to Actions and show what needs proof/reject.
-9. Add or reference a comment on an action.
-10. Move to Risk Recommendations and show Track 2 as the outcome of Track 4 cleanup.
+2. Show Geographic Score Heatmap above Mission Control so trust and uncertainty are visible spatially.
+3. Show overall dataset confidence/readiness beside Row Uncertainty Distribution.
+4. Show scratchpad and explain it feeds re-parsing.
+5. Show dataset preview with search/filter/sort.
+6. Upload the demo XLSX from the current state workflow.
+7. Trigger the agent pipeline.
+8. Watch ingestion, QA, dedupe, evidence, geo, shortage, review, and risk complete.
+9. Move to Actions and show what needs proof/reject.
+10. Add or reference a comment on an action.
+11. Move to Risk Recommendations and show Track 2 as the outcome of Track 4 cleanup.
 
 ## Open Follow-Ups
 
-- Rename `Current Dataset` to `Current State` or keep `Current Dataset` for clarity?
-- Split the current `Import + Actions` tab into separate `Current State` import controls and a dedicated `Actions` tab.
+- Keep `Current State` as the heatmap-first landing label.
+- Keep `Import + Pipeline` separate from `Actions` so upload/stage/run is not confused with proof/reject work.
 - Define the top-level dataset readiness/confidence metric with Lindsay/product input.
+- Keep Geographic Score Heatmap as the first Current State visual and Row Uncertainty Distribution beside Mission Control.
 - Decide which action statuses are required for demo: `auto_fix_ready`, `needs_review`, `accepted`, `rejected`, `commented`.
 - Add CSV export/download for dataset preview if time allows.
 - Decide which fields deserve field-level confidence after the MVP.

@@ -4,6 +4,8 @@ This document defines how recommendations become actionable work packets in Data
 
 The product goal is not to show generic AI advice. The product goal is to turn data-readiness findings into small, auditable workflows that a data steward, clinical reviewer, planner, or safe AI agent can complete.
 
+Related handoff: `docs/agent_workflow_pipeline_v2_lindsay_handoff.md` defines the v2 ten-agent workflow and row_scorer_v2 trust model that generate these action packets.
+
 ## Design Principle
 
 Every action must answer four questions:
@@ -31,7 +33,7 @@ The backend emits action rows from `app/lib/reparser.py`. The core columns are s
 
 Richer behavior lives in the JSON payload persisted through `evidence_json`:
 
-- `action_kind`: frontend renderer selector, such as `duplicate_merge` or `auto_applied`.
+- `action_kind`: frontend renderer selector, such as `duplicate_merge`, `row_uncertainty_review`, or `auto_applied`.
 - `workflow`: the operational workflow name, such as `merge_resolver`.
 - `records`: row-level snapshots needed to make the decision.
 - `field_choices`: selectable canonical field options for merge workflows.
@@ -45,6 +47,33 @@ Richer behavior lives in the JSON payload persisted through `evidence_json`:
 Unity Catalog mode stores these fields in `result.action_recommendations.evidence_json`. Local mode stores them in `app/state/last_run.json`.
 
 ## Workflows
+
+### Row Uncertainty Review
+
+`action_kind: row_uncertainty_review`
+
+Row uncertainty review protects the heatmap from becoming a false-certainty map.
+
+The UI shows:
+
+- low-scoring or blocking-rule facility snapshots
+- row readiness score
+- row uncertainty tier
+- top reason codes
+- evidence cards summarizing the most common reason codes
+
+Review rows means:
+
+- inspect C/D tier rows and rows with blocking reason codes
+- decide whether each row can count in planning, needs steward repair, or should remain excluded from trusted coverage
+- preserve the reason codes and reviewer note in the audit trail
+
+Send to steward means:
+
+- keep the item open
+- route the weak rows to data stewardship before they affect risk planning
+
+The Geographic Score Heatmap uses these scores visually. It should appear before Mission Control so planners see the geography of trust before the roll-up metrics.
 
 ### Duplicate Merge
 

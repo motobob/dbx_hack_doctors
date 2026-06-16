@@ -17,6 +17,7 @@ from typing import Any
 import pandas as pd
 
 from . import pipeline_state as ps
+from .json_fields import normalize_jsonish_records
 from .agents import (
     DedupAgent,
     EvidenceSpecialtyAgent,
@@ -198,8 +199,9 @@ def start_pipeline(incoming_records: list[dict] | None = None) -> str:
     """
     pipeline_id = _new_id()
     state = ps.new_pipeline(pipeline_id)
-    if incoming_records:
-        state["context"] = {"incoming_records": incoming_records}
+    normalized_incoming = normalize_jsonish_records(incoming_records)
+    if normalized_incoming:
+        state["context"] = {"incoming_records": normalized_incoming}
         state["mode"] = "ingest"
     ps.save(state)
 

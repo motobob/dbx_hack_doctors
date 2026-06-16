@@ -53,6 +53,7 @@ if str(APP_DIR) not in sys.path:
 import pandas as pd
 
 from lib import pipeline_state as ps
+from lib.json_fields import normalize_jsonish_dataframe
 from lib.store import read_facilities
 
 
@@ -80,7 +81,7 @@ def read_facilities_for_job() -> pd.DataFrame:
         spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
         limit = int(os.getenv("APP_SOURCE_ROW_LIMIT", "10000"))
         rows = spark.table(_spark_source_table()).limit(limit).collect()
-        return pd.DataFrame([row.asDict(recursive=True) for row in rows])
+        return normalize_jsonish_dataframe(pd.DataFrame([row.asDict(recursive=True) for row in rows]))
     except Exception as exc:
         print(f"[job] Spark source read failed, falling back to SQL connector: {type(exc).__name__}: {exc}")
         return read_facilities()

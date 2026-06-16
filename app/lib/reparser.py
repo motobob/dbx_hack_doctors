@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import json
 from collections import Counter
 from hashlib import sha1
 from typing import Any
@@ -29,6 +30,8 @@ def _not_blank(series: pd.Series) -> pd.Series:
 def _text_or_empty(value: Any) -> str:
     if value is None:
         return ""
+    if isinstance(value, (list, tuple, dict, set)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     if pd.isna(value):
         return ""
     return str(value).strip()
@@ -410,7 +413,7 @@ def row_uncertainty_payload(df: pd.DataFrame) -> dict[str, Any]:
     }
 
 
-def build_map_points(df: pd.DataFrame, max_points: int = 3000) -> list[dict[str, Any]]:
+def build_map_points(df: pd.DataFrame, max_points: int = 10000) -> list[dict[str, Any]]:
     if df.empty or "latitude" not in df.columns or "longitude" not in df.columns:
         return []
     scored = df.copy()

@@ -25,6 +25,8 @@ Preferred path:
 Open the app and pre-check:
 
 - **Current State** loads.
+- **Geographic Score Heatmap** appears above **Mission Control**.
+- **Row Uncertainty Distribution** appears next to **Mission Control**.
 - **Import + Pipeline** opens.
 - `demo/data_readiness_demo_import.xlsx` is available.
 - A recent pipeline has completed, or the local pipeline can complete quickly.
@@ -43,18 +45,63 @@ Say:
 
 > We built Timesharerer Doctors for Track 4, Data Readiness Desk. The thesis is simple: medical desert planning is only useful if the facility data underneath it can be trusted.
 
+Fast line:
+
+> This is a trust model, not a completeness model.
+
 Point to:
 
 - facility count
 - readiness score
+- Geographic Score Heatmap
 - review queue count
 - tab badges
 
-### 0:15-0:40 - Current State
+### 0:15-0:40 - Geographic Trust Map
+
+Point to: **Geographic Score Heatmap**
 
 Say:
 
-> This is the current facility dataset. The app shows duplicate pressure, sparse locations, weak evidence, and the review work that could change planning confidence. These cards are not decorative; they route directly into cleanup work.
+> Before we talk about risk, we show where the data itself is trustworthy. This heatmap plots facility rows across India and colors them by row uncertainty tier, so planners can see whether a region has trusted coverage or just noisy records.
+
+Optional phrase from the v2 handoff:
+
+> A row full of data can still be unsafe.
+
+Point to:
+
+- mapped row count
+- 10,000-point cap note
+- C/D row count
+- zoom controls for inspecting dense clusters
+- dense clusters of weak or strong records
+- clickable tier legend that filters Dataset Preview
+- action/risk rings on dots
+
+Fast line:
+
+> The product starts by making uncertainty geographic.
+
+Click a C or D tier legend item, then point to **Dataset Preview**:
+
+> The map is explainable, not decorative. Clicking a tier carries that uncertainty slice down into the underlying rows, and the state filter lets a reviewer isolate the geography behind a cluster.
+
+Click a dot with an action or risk ring:
+
+> Each dot can open the work behind that row. The pill shows the facility, tier, score, reason codes, and links back into cleanup actions or risk recommendations.
+
+### 0:40-1:05 - Mission Control + Row Scores
+
+Point to: **Mission Control** and **Row Uncertainty Distribution**
+
+Say:
+
+> Mission Control gives the roll-up, but the row distribution tells us how many facilities are trusted enough to count. This replaces generic queues with a real trust map: A/B rows can support planning, while C/D rows become proof or steward work.
+
+Fast line:
+
+> row_scorer_v2 asks whether each row is coherent, evidenced, geospatially plausible, non-duplicative, and safe to count.
 
 Click one KPI or CTA that jumps toward **Actions**, then return or continue if the app lands there naturally.
 
@@ -62,7 +109,7 @@ Fast line:
 
 > The product starts by making uncertainty visible.
 
-### 0:40-1:15 - Import + Pipeline
+### 1:05-1:40 - Import + Pipeline
 
 Click: **Import + Pipeline**
 
@@ -91,11 +138,24 @@ Say:
 
 > The pipeline does the first pass: ingest, QA, PIN and NFHS context, dedupe, evidence, geography, shortage, review gate, and risk synthesis.
 
+Point to agent cards as:
+
+- 01 Ingestion Manager
+- 02 QA Profile
+- 03 PIN Code Ingestion
+- 04 NFHS Survey Ingestion
+- 05 Deduplication
+- 06 Evidence / Claim Verification
+- 07 Geolocation / Coverage
+- 08 Shortage
+- 09 Human Review Gate
+- 10 Risk / Coverage Scoring
+
 If a completed run is already visible:
 
-> This completed run shows all ten agents finished cleanly. The green notifications are review work, not failed tasks.
+> This completed run shows all ten agents finished cleanly. The green signal cards are raw agent findings, not the curated action or risk counts.
 
-### 1:15-2:05 - Actions Queue
+### 1:40-2:20 - Actions Queue
 
 Click: **Actions**
 
@@ -131,7 +191,7 @@ Say:
 
 > The reviewer decision becomes part of the resulting state instead of living in a side spreadsheet.
 
-### 2:05-2:45 - Risk Recommendations
+### 2:20-2:50 - Risk Recommendations
 
 Click: **Risk Recommendations**
 
@@ -141,25 +201,39 @@ Say:
 
 Click a risk row.
 
-If visible, click or point to:
+Point to:
 
+- **Selected Recommendation**
+- **Next step**
+- **Facts to verify**
+- linked cleanup action cards
 - **Open cleanup actions**
 - **Open evidence queue**
+- **Open dedupe queue**
 
 Say:
 
-> Planning recommendations link back to cleanup actions, so the team can tell whether a care gap is real or whether the data still needs validation.
+> This is not a passive recommendation table. Each planning signal has facts, a next step, and links back to the cleanup work that must be resolved before anyone treats the gap as real.
 
-### 2:45-3:00 - Close
+Click a linked cleanup action card or **Open cleanup actions** if time allows:
+
+> The risk recommendation stays connected to the proof/reject queue, so planning and data stewardship are part of the same workflow.
+
+### 2:50-3:00 - Close
 
 Say:
 
 > That is the loop: agents triage messy healthcare data, humans proof the decisions that matter, and the trusted resulting state powers medical desert planning.
 
+Optional slogan close:
+
+> Inspire people to go further and share more.
+
 ## What To Skip If Time Is Tight
 
 - Do not read the full agent list.
 - Do not explain every score formula.
+- Do not over-explain the heatmap projection; use it as the visual proof that trust has geography.
 - Do not scroll deeply through the dataset preview.
 - Do not wait for a long cloud run; use the latest completed run.
 - Do not open diagnostics unless the app is failing.
@@ -191,5 +265,7 @@ If the app shows fallback data:
 
 - "Track 4 is the product; Track 2 is the outcome."
 - "The app never turns weak evidence into fake certainty."
+- "A row full of data can still be unsafe."
+- "We score trust, not just completeness."
 - "Agents do the first pass; humans proof the calls that change planning."
 - "Risk is computed from trusted resulting state, not raw scraped claims."

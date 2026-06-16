@@ -29,6 +29,8 @@ UUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]
 def _text(value: Any) -> str:
     if value is None:
         return ""
+    if isinstance(value, (list, tuple, dict, set)):
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     if pd.isna(value):
         return ""
     return str(value).strip()

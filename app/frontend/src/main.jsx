@@ -318,9 +318,14 @@ function tierColor(tier) {
   return "#98102a";
 }
 
-function IndiaScoreMap({ points = [] }) {
+function IndiaScoreMap({ points = [], selectedTier = "All", selectedState = "All", selectedWork = "All", onTierSelect, onWorkSelect, onActionJump, onRiskJump }) {
+  const [mapZoom, setMapZoom] = useState(1);
+  const [selectedPoint, setSelectedPoint] = useState(null);
+  const pointCap = 10000;
   const width = 720;
   const height = 520;
+  const mapCenterX = width / 2;
+  const mapCenterY = height / 2;
   const lonMin = 68;
   const lonMax = 98;
   const latMin = 8;
@@ -338,6 +343,24 @@ function IndiaScoreMap({ points = [] }) {
     acc[tier] = (acc[tier] || 0) + 1;
     return acc;
   }, { A: 0, B: 0, C: 0, D: 0 });
+  const visiblePoints = validPoints.filter((point) => {
+    const matchesTier = selectedTier === "All" || String(point.tier || "D").toUpperCase() === selectedTier;
+    const matchesState = selectedState === "All" || String(point.state || "").trim() === selectedState;
+    const matchesWork =
+      selectedWork === "All" ||
+      (selectedWork === "Actions" && Boolean(point.actions?.length)) ||
+      (selectedWork === "Risks" && Boolean(point.risks?.length));
+    return matchesTier && matchesState && matchesWork;
+  });
+  const workCounts = validPoints.reduce((acc, point) => {
+    if (point.actions?.length) acc.Actions += 1;
+    if (point.risks?.length) acc.Risks += 1;
+    return acc;
+  }, { Actions: 0, Risks: 0 });
+  const mapIsFiltered = selectedTier !== "All" || selectedState !== "All" || selectedWork !== "All";
+  useEffect(() => {
+    setSelectedPoint(null);
+  }, [selectedTier, selectedState, selectedWork]);
 
   function project(lon, lat) {
     return {
@@ -362,23 +385,94 @@ function IndiaScoreMap({ points = [] }) {
     return `${x.toFixed(1)},${y.toFixed(1)}`;
   }).join(" ");
 
-  const plotted = [...validPoints].sort((left, right) => Number(right.score || 0) - Number(left.score || 0));
+  const plotted = [...visiblePoints].sort((left, right) => Number(right.score || 0) - Number(left.score || 0));
+  const workAreas = useMemo(() => {
+    const grouped = new Map();
+    const addAreaPoint = (key, payload, point) => {
+      const existing = grouped.get(key) || { ...payload, points: [], count: 0 };
+      existing.points.push(point);
+      existing.count += 1;
+      grouped.set(key, existing);
+    };
+    visiblePoints.forEach((point) => {
+      (point.actions || []).forEach((action) => {
+        addAreaPoint(`action-${action.label}`, {
+          type: "action",
+          label: action.label || "Action",
+          name: `${action.label || "Action"} work area`,
+          actions: [action],
+          risks: [],
+          state: point.state,
+        }, point);
+      });
+      (point.risks || []).forEach((risk) => {
+        addAreaPoint(`risk-${risk.state}-${risk.location}-${risk.risk}`, {
+          type: "risk",
+          label: risk.risk || "Risk",
+          name: `${risk.risk || "Risk recommendation"} · ${risk.location || risk.state}`,
+          actions: [],
+          risks: [risk],
+          state: risk.state || point.state,
+        }, point);
+      });
+    });
+    return [...grouped.values()]
+      .map((area) => {
+        const lat = area.points.reduce((sum, point) => sum + Number(point.lat), 0) / area.points.length;
+        const lon = area.points.reduce((sum, point) => sum + Number(point.lon), 0) / area.points.length;
+        const { x, y } = project(lon, lat);
+        return {
+          ...area,
+          x,
+          y,
+          radius: Math.min(54, 15 + Math.sqrt(area.count) * 2.8),
+          note: `${area.count.toLocaleString()} mapped row${area.count === 1 ? "" : "s"} linked to this ${area.type === "risk" ? "risk recommendation" : "action"}.`,
+        };
+      })
+      .sort((left, right) => right.count - left.count)
+      .slice(0, 10);
+  }, [visiblePoints]);
+  const actionAreaCount = workAreas.filter((area) => area.type === "action").length;
+  const riskAreaCount = workAreas.filter((area) => area.type === "risk").length;
+  const contentTransform = `translate(${mapCenterX} ${mapCenterY}) scale(${mapZoom}) translate(${-mapCenterX} ${-mapCenterY})`;
+  const zoomIn = () => setMapZoom((value) => Math.min(4, Number((value + 0.5).toFixed(1))));
+  const zoomOut = () => setMapZoom((value) => Math.max(1, Number((value - 0.5).toFixed(1))));
 
   return (
     <div className="india-map-card">
       <div className="score-bi-head">
         <div>
           <h2>Geographic Score Heatmap</h2>
-          <p>Facility lat/lon plotted over India bounds, colored by row uncertainty tier.</p>
+          <p>
+            Valid India lat/lon rows plotted up to the 10,000-point cap, colored by row uncertainty tier
+            {mapIsFiltered ? " and filtered to the active preview slice." : "."}
+          </p>
         </div>
         <Metric
           label="Mapped rows"
-          value={validPoints.length.toLocaleString()}
-          detail={`${Number(tierCounts.C + tierCounts.D).toLocaleString()} C/D rows`}
+          value={visiblePoints.length.toLocaleString()}
+          detail={mapIsFiltered
+            ? `${validPoints.length.toLocaleString()} total mapped · cap ${pointCap.toLocaleString()}`
+            : `${Number(tierCounts.C + tierCounts.D).toLocaleString()} C/D rows · cap ${pointCap.toLocaleString()}`}
           tone="risk"
         />
       </div>
       <div className="map-wrap">
+        <div className="map-controls" aria-label="Heatmap zoom controls">
+          <button type="button" onClick={zoomIn} disabled={mapZoom >= 4} title="Zoom in" aria-label="Zoom in">
+            +
+          </button>
+          <button type="button" onClick={zoomOut} disabled={mapZoom <= 1} title="Zoom out" aria-label="Zoom out">
+            -
+          </button>
+          <button type="button" onClick={() => setMapZoom(1)} disabled={mapZoom === 1} title="Reset zoom" aria-label="Reset zoom">
+            1x
+          </button>
+        </div>
+        <div className="map-work-legend" aria-label="Action and recommendation map overlays">
+          <span><i className="work-dot action" /> Action areas <b>{actionAreaCount}</b></span>
+          <span><i className="work-dot risk" /> Risk rec areas <b>{riskAreaCount}</b></span>
+        </div>
         <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="India latitude longitude score heatmap">
           <defs>
             <filter id="heat-glow">
@@ -389,59 +483,179 @@ function IndiaScoreMap({ points = [] }) {
               </feMerge>
             </filter>
           </defs>
-          {[70, 75, 80, 85, 90, 95].map((lon) => {
-            const { x } = project(lon, latMin);
-            return <line className="map-grid" x1={x} x2={x} y1="0" y2={height} key={`lon-${lon}`} />;
-          })}
-          {[10, 15, 20, 25, 30, 35].map((lat) => {
-            const { y } = project(lonMin, lat);
-            return <line className="map-grid" x1="0" x2={width} y1={y} y2={y} key={`lat-${lat}`} />;
-          })}
-          <polygon className="india-outline" points={outline} />
-          {plotted.map((point, index) => {
-            const { x, y } = project(point.lon, point.lat);
-            const tier = String(point.tier || "D").toUpperCase();
-            const radius = tier === "D" ? 7 : tier === "C" ? 6 : 4;
-            const opacity = tier === "A" ? 0.26 : tier === "B" ? 0.34 : tier === "C" ? 0.52 : 0.62;
-            const label = `${point.name || "Facility"} · ${point.city || ""} ${point.state || ""} · score ${point.score} · tier ${tier}`;
-            return (
-              <circle
-                className={`map-point map-point-${tier.toLowerCase()}`}
-                cx={x}
-                cy={y}
-                r={radius}
-                fill={tierColor(tier)}
-                opacity={opacity}
-                filter={tier === "C" || tier === "D" ? "url(#heat-glow)" : undefined}
-                key={`${point.lat}-${point.lon}-${index}`}
+          <g transform={contentTransform}>
+            {[70, 75, 80, 85, 90, 95].map((lon) => {
+              const { x } = project(lon, latMin);
+              return <line className="map-grid" x1={x} x2={x} y1="0" y2={height} key={`lon-${lon}`} />;
+            })}
+            {[10, 15, 20, 25, 30, 35].map((lat) => {
+              const { y } = project(lonMin, lat);
+              return <line className="map-grid" x1="0" x2={width} y1={y} y2={y} key={`lat-${lat}`} />;
+            })}
+            <polygon className="india-outline" points={outline} />
+            {plotted.map((point, index) => {
+              const { x, y } = project(point.lon, point.lat);
+              const tier = String(point.tier || "D").toUpperCase();
+              const radius = tier === "D" ? 7 : tier === "C" ? 6 : 4;
+              const opacity = tier === "A" ? 0.26 : tier === "B" ? 0.34 : tier === "C" ? 0.52 : 0.62;
+              const label = `${point.name || "Facility"} · ${point.city || ""} ${point.state || ""} · score ${point.score} · tier ${tier}`;
+              return (
+                <circle
+                  className={[
+                    "map-point",
+                    `map-point-${tier.toLowerCase()}`,
+                    point.actions?.length ? "map-point-action" : "",
+                    point.risks?.length ? "map-point-risk" : "",
+                  ].filter(Boolean).join(" ")}
+                  cx={x}
+                  cy={y}
+                  r={radius}
+                  fill={tierColor(tier)}
+                  opacity={opacity}
+                  filter={tier === "C" || tier === "D" ? "url(#heat-glow)" : undefined}
+                  role="button"
+                  tabIndex="0"
+                  onClick={() => setSelectedPoint(point)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setSelectedPoint(point);
+                    }
+                  }}
+                  key={`${point.lat}-${point.lon}-${index}`}
+                >
+                  <title>{label}</title>
+                </circle>
+              );
+            })}
+            {workAreas.map((area) => (
+              <g
+                className={`map-work-area map-work-area-${area.type}`}
+                transform={`translate(${area.x} ${area.y})`}
+                role="button"
+                tabIndex="0"
+                onClick={() => setSelectedPoint({
+                  name: area.name,
+                  kind: area.type === "risk" ? "Risk recommendation area" : "Action work area",
+                  state: area.state,
+                  score: area.count,
+                  reasons: [area.note],
+                  actions: area.actions,
+                  risks: area.risks,
+                })}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setSelectedPoint({
+                      name: area.name,
+                      kind: area.type === "risk" ? "Risk recommendation area" : "Action work area",
+                      state: area.state,
+                      score: area.count,
+                      reasons: [area.note],
+                      actions: area.actions,
+                      risks: area.risks,
+                    });
+                  }
+                }}
+                aria-label={`${area.name}: ${area.note}`}
+                key={`${area.type}-${area.label}-${area.state}`}
               >
-                <title>{label}</title>
-              </circle>
-            );
-          })}
+                <circle r={area.radius} />
+                <circle className="map-work-area-core" r="9" />
+                <text y="4">{area.type === "risk" ? "R" : "A"}</text>
+              </g>
+            ))}
+          </g>
         </svg>
+        {selectedPoint ? (
+          <div className="map-note-pill" role="status">
+            <button type="button" onClick={() => setSelectedPoint(null)} aria-label="Close selected facility note">
+              ×
+            </button>
+            <strong>{selectedPoint.name || "Selected facility"}</strong>
+            <span>
+              {selectedPoint.kind || `Tier ${String(selectedPoint.tier || "D").toUpperCase()} · score ${selectedPoint.score ?? "n/a"}`}
+            </span>
+            <span>{[selectedPoint.city, selectedPoint.state].filter(Boolean).join(", ") || "No location label"}</span>
+            {(selectedPoint.reasons || []).length ? (
+              <small>{selectedPoint.reasons.join(" · ")}</small>
+            ) : null}
+            <div className="map-note-links">
+              {selectedPoint.actions?.length ? (
+                <button
+                  type="button"
+                  onClick={() => onActionJump?.(selectedPoint.actions[0].focus)}
+                >
+                  {selectedPoint.actions.length.toLocaleString()} action{selectedPoint.actions.length === 1 ? "" : "s"}
+                </button>
+              ) : null}
+              {selectedPoint.risks?.length ? (
+                <button
+                  type="button"
+                  onClick={() => onRiskJump?.(selectedPoint.risks[0])}
+                >
+                  {selectedPoint.risks.length.toLocaleString()} risk rec{selectedPoint.risks.length === 1 ? "" : "s"}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
       </div>
-      <div className="map-legend">
+      <div className="map-legend" aria-label="Filter dataset preview by heatmap tier">
+        <button
+          type="button"
+          className={`map-legend-item ${selectedTier === "All" ? "active" : ""}`}
+          onClick={() => onTierSelect?.("All")}
+          aria-pressed={selectedTier === "All"}
+        >
+          All <b>{validPoints.length.toLocaleString()}</b>
+        </button>
         {["A", "B", "C", "D"].map((tier) => (
-          <span key={tier}>
+          <button
+            type="button"
+            className={`map-legend-item ${selectedTier === tier ? "active" : ""}`}
+            onClick={() => onTierSelect?.(selectedTier === tier ? "All" : tier)}
+            aria-pressed={selectedTier === tier}
+            aria-label={`Filter preview to Tier ${tier}`}
+            key={tier}
+          >
             <i style={{ background: tierColor(tier) }} />
             Tier {tier} <b>{Number(tierCounts[tier] || 0).toLocaleString()}</b>
-          </span>
+          </button>
         ))}
+        <button
+          type="button"
+          className={`map-legend-item map-legend-work ${selectedWork === "Actions" ? "active" : ""}`}
+          onClick={() => onWorkSelect?.(selectedWork === "Actions" ? "All" : "Actions")}
+          aria-pressed={selectedWork === "Actions"}
+        >
+          <i className="work-dot action" />
+          Actions <b>{workCounts.Actions.toLocaleString()}</b>
+        </button>
+        <button
+          type="button"
+          className={`map-legend-item map-legend-work ${selectedWork === "Risks" ? "active" : ""}`}
+          onClick={() => onWorkSelect?.(selectedWork === "Risks" ? "All" : "Risks")}
+          aria-pressed={selectedWork === "Risks"}
+        >
+          <i className="work-dot risk" />
+          Risk recs <b>{workCounts.Risks.toLocaleString()}</b>
+        </button>
       </div>
     </div>
   );
 }
 
-function CurrentState({ state, onActionJump }) {
+function CurrentState({ state, onActionJump, onRiskJump }) {
   const profile = state.run.profile;
   const actions = state.run.actions || [];
+  const risks = state.run.risks || [];
   const components = profile.score_components || {};
   const reviewQueueCount = actions.filter((action) => (
     action.decision_required !== false &&
     ["Human review", "Evidence review", "Steward triage"].includes(inferredQueue(action))
   )).length;
-  const previewColumns = [
+  const previewColumns = useMemo(() => [
     { key: "name", label: "Facility" },
     { key: "row_readiness_score", label: "Score", render: (row) => <ScorePill score={row.row_readiness_score} /> },
     { key: "row_uncertainty_tier", label: "Tier", render: (row) => <TierPill tier={row.row_uncertainty_tier} /> },
@@ -451,20 +665,86 @@ function CurrentState({ state, onActionJump }) {
     { key: "organization_type", label: "Type" },
     { key: "row_reason_codes", label: "Top reasons", render: (row) => <ReasonCodes value={row.row_reason_codes} /> },
     { key: "readiness_flags", label: "Readiness flags", render: (row) => <ReadinessFlags value={row.readiness_flags} /> }
-  ];
+  ], []);
   const [previewSearch, setPreviewSearch] = useState("");
+  const [previewTier, setPreviewTier] = useState("All");
+  const [previewState, setPreviewState] = useState("All");
+  const [previewWork, setPreviewWork] = useState("All");
   const [previewSort, setPreviewSort] = useState({ key: "name", direction: "asc" });
+  const stateOptions = useMemo(() => (
+    [...new Set(
+      state.preview
+        .map((row) => String(row.address_stateOrRegion ?? "").trim())
+        .filter(Boolean)
+    )].sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }))
+  ), [state.preview]);
+  const mapPoints = useMemo(() => {
+    const openActions = actions.filter((action) => !["Approved", "Applied", "Rejected"].includes(action.status));
+    const actionMatchesPoint = (action, point) => {
+      const issue = String(action.issue_type || "").toLowerCase();
+      const reasons = (point.reasons || []).join(" ").toLowerCase();
+      const tier = String(point.tier || "").toUpperCase();
+      if (issue.includes("row uncertainty")) return ["C", "D"].includes(tier);
+      if (issue.includes("location")) return reasons.includes("location") || reasons.includes("pin") || !point.city || !point.state;
+      if (issue.includes("duplicate")) return reasons.includes("duplicate") || reasons.includes("cluster");
+      if (issue.includes("capability") || issue.includes("nicu")) return reasons.includes("capability") || reasons.includes("claim") || reasons.includes("evidence") || reasons.includes("bloat");
+      if (issue.includes("tag")) return true;
+      return ["C", "D"].includes(tier);
+    };
+    const riskMatchesPoint = (risk, point) => {
+      const riskState = String(risk.state || "").trim().toLowerCase();
+      const riskLocation = String(risk.location || "").trim().toLowerCase();
+      const pointState = String(point.state || "").trim().toLowerCase();
+      const pointCity = String(point.city || "").trim().toLowerCase();
+      return Boolean(
+        (riskState && riskState === pointState) ||
+        (riskLocation && (riskLocation === pointCity || riskLocation === pointState))
+      );
+    };
+    return (state.map_points || []).map((point) => ({
+      ...point,
+      actions: openActions
+        .filter((action) => actionMatchesPoint(action, point))
+        .slice(0, 4)
+        .map((action) => ({
+          action_id: action.action_id,
+          label: action.issue_type,
+          focus: {
+            queue: "All",
+            priority: "All",
+            owner: action.owner || "All",
+            status: "All",
+            issue: action.issue_type || "All",
+          },
+        })),
+      risks: risks
+        .filter((risk) => riskMatchesPoint(risk, point))
+        .slice(0, 3),
+    }));
+  }, [actions, risks, state.map_points]);
+  const previewWorkKeys = useMemo(() => new Set(
+    mapPoints
+      .filter((point) => (
+        previewWork === "All" ||
+        (previewWork === "Actions" && point.actions?.length) ||
+        (previewWork === "Risks" && point.risks?.length)
+      ))
+      .map((point) => `${String(point.name || "").toLowerCase()}|${String(point.city || "").toLowerCase()}|${String(point.state || "").toLowerCase()}`)
+  ), [mapPoints, previewWork]);
   const previewRows = useMemo(() => {
     const search = previewSearch.trim().toLowerCase();
-    const filtered = search
-      ? state.preview.filter((row) =>
-          previewColumns.some((column) =>
-            String(row[column.key] ?? "")
-              .toLowerCase()
-              .includes(search)
-          )
-        )
-      : [...state.preview];
+    const filtered = state.preview.filter((row) => {
+      const matchesSearch = !search || previewColumns.some((column) =>
+        String(row[column.key] ?? "")
+          .toLowerCase()
+          .includes(search)
+      );
+      const matchesTier = previewTier === "All" || String(row.row_uncertainty_tier ?? "").toUpperCase() === previewTier;
+      const matchesState = previewState === "All" || String(row.address_stateOrRegion ?? "").trim() === previewState;
+      const rowKey = `${String(row.name || "").toLowerCase()}|${String(row.address_city || "").toLowerCase()}|${String(row.address_stateOrRegion || "").toLowerCase()}`;
+      const matchesWork = previewWork === "All" || previewWorkKeys.has(rowKey);
+      return matchesSearch && matchesTier && matchesState && matchesWork;
+    });
     filtered.sort((left, right) => {
       const leftValue = String(left[previewSort.key] ?? "").toLowerCase();
       const rightValue = String(right[previewSort.key] ?? "").toLowerCase();
@@ -472,8 +752,13 @@ function CurrentState({ state, onActionJump }) {
       return previewSort.direction === "asc" ? comparison : -comparison;
     });
     return filtered;
-  }, [state.preview, previewSearch, previewSort]);
-
+  }, [state.preview, previewColumns, previewSearch, previewTier, previewState, previewWork, previewWorkKeys, previewSort]);
+  const activePreviewFilters = [
+    previewTier !== "All" ? `Tier ${previewTier}` : null,
+    previewState !== "All" ? previewState : null,
+    previewWork !== "All" ? previewWork : null,
+    previewSearch.trim() ? "search" : null,
+  ].filter(Boolean);
   function togglePreviewSort(key) {
     setPreviewSort((current) => ({
       key,
@@ -563,6 +848,19 @@ function CurrentState({ state, onActionJump }) {
         </div>
       </div>
 
+      <div className="panel full">
+        <IndiaScoreMap
+          points={mapPoints}
+          selectedTier={previewTier}
+          selectedState={previewState}
+          selectedWork={previewWork}
+          onTierSelect={setPreviewTier}
+          onWorkSelect={setPreviewWork}
+          onActionJump={onActionJump}
+          onRiskJump={onRiskJump}
+        />
+      </div>
+
       <div className="panel current-numbers">
         <div className="panel-head">
           <div>
@@ -609,31 +907,7 @@ function CurrentState({ state, onActionJump }) {
       </div>
 
       <div className="panel">
-        <div className="panel-head">
-          <div>
-            <h2>Recommended Queues</h2>
-            <p>Fast paths into the cleanup work behind the readiness scores.</p>
-          </div>
-        </div>
-        <div className="callout-list">
-          <button onClick={() => onActionJump({ issue: "Duplicate cluster", status: "All", owner: "All" })}>
-            Dedupe recommendations affect facility counts and coverage.
-          </button>
-          <button onClick={() => onActionJump({ issue: "Location quality", status: "All", owner: "All" })}>
-            Sparse or weak locations reduce planning confidence.
-          </button>
-          <button onClick={() => onActionJump({ issue: "NICU review", status: "All", owner: "Human" })}>
-            Clinical claims need evidence before planners trust them.
-          </button>
-        </div>
-      </div>
-
-      <div className="panel full">
         <ScoreDistribution profile={profile} />
-      </div>
-
-      <div className="panel full">
-        <IndiaScoreMap points={state.map_points || []} />
       </div>
 
       <div className="panel full">
@@ -641,7 +915,8 @@ function CurrentState({ state, onActionJump }) {
           <div>
             <h2>Dataset Preview</h2>
             <p>
-              Showing {previewRows.length.toLocaleString()} preview rows from {profile.row_count.toLocaleString()} loaded facility records.
+              Showing {previewRows.length.toLocaleString()} preview rows from {profile.row_count.toLocaleString()} loaded facility records
+              {activePreviewFilters.length ? ` filtered by ${activePreviewFilters.join(", ")}.` : "."}
             </p>
           </div>
           <div className="preview-controls">
@@ -651,6 +926,26 @@ function CurrentState({ state, onActionJump }) {
               onChange={(event) => setPreviewSearch(event.target.value)}
               placeholder="Search preview"
             />
+            <select
+              value={previewTier}
+              onChange={(event) => setPreviewTier(event.target.value)}
+              aria-label="Filter by uncertainty tier"
+            >
+              <option value="All">All tiers</option>
+              {["A", "B", "C", "D"].map((tier) => (
+                <option key={tier} value={tier}>Tier {tier}</option>
+              ))}
+            </select>
+            <select
+              value={previewState}
+              onChange={(event) => setPreviewState(event.target.value)}
+              aria-label="Filter by state"
+            >
+              <option value="All">All states</option>
+              {stateOptions.map((stateName) => (
+                <option key={stateName} value={stateName}>{stateName}</option>
+              ))}
+            </select>
             <select
               value={previewSort.key}
               onChange={(event) => setPreviewSort({ ...previewSort, key: event.target.value })}
@@ -664,6 +959,19 @@ function CurrentState({ state, onActionJump }) {
             <button onClick={() => setPreviewSort({ ...previewSort, direction: previewSort.direction === "asc" ? "desc" : "asc" })}>
               {previewSort.direction === "asc" ? "Asc" : "Desc"}
             </button>
+            {activePreviewFilters.length ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setPreviewSearch("");
+                  setPreviewTier("All");
+                  setPreviewState("All");
+                  setPreviewWork("All");
+                }}
+              >
+                Clear
+              </button>
+            ) : null}
           </div>
         </div>
         <DataTable
@@ -784,19 +1092,19 @@ function PipelinePanel({ pipeline, onStart, busy, ingestRecords, className = "" 
   const completedAgents = AGENT_NAMES.filter((name) => agents[name]?.status === "completed").length;
   const openPipelineNotifications = [
     {
-      label: "Review gate",
+      label: "Review gate signals",
       value: reviewSummary.review_count || 0,
-      detail: "proof/reject items from dedupe, PIN, evidence, geo, and shortage signals"
+      detail: "raw agent findings considered by the proof/reject queue"
     },
     {
-      label: "PIN enrichment",
+      label: "PIN enrichment signals",
       value: pincodeSummary.review_item_count || 0,
-      detail: "postal rows that need review before automatic geography enrichment"
+      detail: "raw postal ambiguity signals before curated action grouping"
     },
     {
-      label: "Evidence checks",
+      label: "Evidence signals",
       value: evidenceSummary.review_claims || 0,
-      detail: "weak or suspicious capability claims"
+      detail: "raw weak/suspicious claim signals before action grouping"
     }
   ].filter((item) => Number(item.value || 0) > 0);
   const tone = STATUS_TONE[status] || "neutral";
@@ -817,7 +1125,7 @@ function PipelinePanel({ pipeline, onStart, busy, ingestRecords, className = "" 
           </p>
           {status === "completed" ? (
             <p className="pipeline-steady">
-              {completedAgents}/{AGENT_NAMES.length} agents completed. Green means the last run finished cleanly; notifications below are review work, not failed tasks.
+              {completedAgents}/{AGENT_NAMES.length} agents completed. Green means the last run finished cleanly; signal cards below are raw agent findings, not curated Actions/Risk counts.
             </p>
           ) : null}
         </div>
@@ -1679,8 +1987,9 @@ function ActionsQueue({ state, onDecision, focus }) {
   );
 }
 
-function RiskRecommendations({ state, onActionJump }) {
+function RiskRecommendations({ state, onActionJump, focus }) {
   const risks = state.run.risks || [];
+  const actions = state.run.actions || [];
   const [selected, setSelected] = useState(risks[0] || null);
   const [confidence, setConfidence] = useState("All");
   const [planningNote, setPlanningNote] = useState("");
@@ -1690,9 +1999,50 @@ function RiskRecommendations({ state, onActionJump }) {
     [risks, confidence]
   );
 
+  useEffect(() => {
+    if (!focus) return;
+    const next = risks.find((risk) => (
+      (focus.risk_id && risk.risk_id === focus.risk_id) ||
+      (focus.location && risk.location === focus.location && risk.state === focus.state) ||
+      (focus.state && risk.state === focus.state)
+    ));
+    if (next) {
+      setSelected(next);
+      setConfidence("All");
+    }
+  }, [focus, risks]);
+
   function openRelatedQueue() {
     onActionJump({ queue: "All", issue: "Location quality", status: "All", owner: "All" });
   }
+  const selectedFacts = useMemo(() => {
+    if (!selected) return [];
+    const why = String(selected.why || "");
+    const numbers = [...why.matchAll(/([\d,]+)\s+(records|have capability evidence|lack PIN)/g)].map((match) => ({
+      value: match[1],
+      label: match[2] === "records" ? "Facility rows" : match[2],
+    }));
+    const stateRows = (state.preview || []).filter((row) => row.address_stateOrRegion === selected.state);
+    const weakRows = stateRows.filter((row) => ["C", "D"].includes(String(row.row_uncertainty_tier || "").toUpperCase())).length;
+    return [
+      ...numbers,
+      { value: selected.confidence || "Unknown", label: "Recommendation confidence" },
+      { value: selected.priority || "P?", label: "Planning priority" },
+      { value: weakRows.toLocaleString(), label: "C/D preview rows in state" },
+    ];
+  }, [selected, state.preview]);
+  const relatedActions = useMemo(() => {
+    if (!selected) return [];
+    return actions
+      .filter((action) => {
+        const issue = String(action.issue_type || "").toLowerCase();
+        return issue.includes("location") || issue.includes("capability") || issue.includes("duplicate") || issue.includes("row uncertainty");
+      })
+      .slice(0, 4);
+  }, [actions, selected]);
+  const nextStep = selected?.confidence === "High"
+    ? "Use this as a planning candidate only after checking the linked cleanup queues for duplicate, location, and evidence blockers."
+    : "Treat this as a data-quality investigation first; resolve weak geography and evidence before turning it into a planning claim.";
 
   return (
     <section className="page-grid">
@@ -1720,21 +2070,70 @@ function RiskRecommendations({ state, onActionJump }) {
             { key: "care_need", label: "Care need" },
             { key: "risk", label: "Risk" },
             { key: "confidence", label: "Confidence" },
-            { key: "why", label: "Why" }
+            { key: "why", label: "Why" },
+            {
+              key: "action",
+              label: "",
+              render: (row) => <span className="row-detail-hint">{selected?.location === row.location ? "Selected" : "Inspect"}</span>
+            }
           ]}
         />
       </div>
       <div className="panel full detail-panel">
-        <div>
-          <h2>Recommendation Detail</h2>
+        <div className="selected-action-column">
+          <h2>Selected Recommendation</h2>
           {selected ? (
             <>
               <p className="recommendation">{selected.risk} in {selected.location}, {selected.state}</p>
-              <p>{selected.why}</p>
-              <p>{selected.look_at}</p>
+              <div className="next-action">
+                <span className={`queue-chip priority-${String(selected.priority || "medium").toLowerCase()}`}>{selected.priority || "Priority"}</span>
+                <h3>Next step</h3>
+                <p>{nextStep}</p>
+              </div>
+              <dl>
+                <dt>Care need</dt>
+                <dd>{selected.care_need}</dd>
+                <dt>Evidence basis</dt>
+                <dd>{selected.why}</dd>
+                <dt>Look at</dt>
+                <dd>{selected.look_at}</dd>
+                <dt>Confidence</dt>
+                <dd>{selected.confidence}</dd>
+              </dl>
+              <div className="action-workspace">
+                <div>
+                  <h3>Facts to verify</h3>
+                  <div className="evidence-grid">
+                    {selectedFacts.map((fact) => (
+                      <div className={fact.label.includes("confidence") && fact.value === "High" ? "evidence-card evidence-high" : "evidence-card"} key={`${fact.label}-${fact.value}`}>
+                        <span>{fact.label}</span>
+                        <b>{fact.value}</b>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <h3>Cleanup work connected to this recommendation</h3>
+                  <div className="risk-action-list">
+                    {relatedActions.length ? relatedActions.map((action) => (
+                      <button
+                        type="button"
+                        key={action.action_id}
+                        onClick={() => onActionJump({ queue: "All", issue: action.issue_type, status: "All", owner: action.owner || "All" })}
+                      >
+                        <span>{action.issue_type}</span>
+                        <b>{action.recommendation}</b>
+                      </button>
+                    )) : (
+                      <p>No linked cleanup actions for this recommendation.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
               <div className="button-row">
                 <button className="primary" onClick={openRelatedQueue}>Open cleanup actions</button>
                 <button onClick={() => onActionJump({ queue: "Evidence review", issue: "All", status: "All", owner: "All" })}>Open evidence queue</button>
+                <button onClick={() => onActionJump({ queue: "All", issue: "Duplicate cluster", status: "All", owner: "All" })}>Open dedupe queue</button>
               </div>
             </>
           ) : (
@@ -1755,6 +2154,7 @@ function RiskRecommendations({ state, onActionJump }) {
 function App() {
   const [activeTab, setActiveTab] = useState(tabs[0]);
   const [actionFocus, setActionFocus] = useState(null);
+  const [riskFocus, setRiskFocus] = useState(null);
   const [state, setState] = useState(null);
   const [config, setConfig] = useState(null);
   const [scratchpad, setScratchpad] = useState("");
@@ -1879,6 +2279,11 @@ function App() {
     setActiveTab("Actions");
   }
 
+  function jumpToRisks(focus) {
+    setRiskFocus(focus || null);
+    setActiveTab("Risk Recommendations");
+  }
+
   if (error) {
     return (
       <main className="app-shell">
@@ -1944,6 +2349,7 @@ function App() {
         <CurrentState
           state={state}
           onActionJump={jumpToActions}
+          onRiskJump={jumpToRisks}
         />
       ) : null}
       {activeTab === "NGO Planner" ? <NGOPlanner state={state} onActionJump={jumpToActions} /> : null}
@@ -1960,7 +2366,7 @@ function App() {
         />
       ) : null}
       {activeTab === "Actions" ? <ActionsQueue state={state} onDecision={actionDecision} focus={actionFocus} /> : null}
-      {activeTab === "Risk Recommendations" ? <RiskRecommendations state={state} onActionJump={jumpToActions} /> : null}
+      {activeTab === "Risk Recommendations" ? <RiskRecommendations state={state} onActionJump={jumpToActions} focus={riskFocus} /> : null}
     </main>
   );
 }

@@ -4,11 +4,12 @@ DBX 2026 hackathon workspace tooling.
 
 ## Demo Thesis
 
-This app solves **Track 4: Data Readiness Desk** while keeping **Track 2: Medical Desert Planner** as the downstream outcome. In the demo, messy facility records flow through an agent-led readiness pipeline, humans only proof/reject material findings, and the resulting trusted state powers the risk-planning view.
+This app solves **Track 4: Data Readiness Desk** while keeping **Track 2: Medical Desert Planner** as the downstream outcome. In the demo, the Current State page leads with a Geographic Score Heatmap, messy facility records flow through an agent-led readiness pipeline, humans only proof/reject material findings, and the resulting trusted state powers the risk-planning view.
 
 ```mermaid
 flowchart LR
-  raw[Messy facility data] --> agents[Databricks agent workflow]
+  raw[Messy facility data] --> heatmap[Geographic Score Heatmap]
+  heatmap --> agents[Databricks agent workflow]
   agents --> review[Proof / reject queue]
   review --> trusted[Trusted resulting state]
   trusted --> risk[Medical desert risk planner]
@@ -24,6 +25,11 @@ The demo folder has the presenter-ready assets:
 - `demo/SCORE_GUIDE.md`: plain-English definitions for every percentage score.
 - `demo/DEVPOST_STORY.md`: Devpost-ready submission story.
 - `demo/data_readiness_demo_import.xlsx`: 12-row XLSX import designed to trigger duplicate, sparse-field, weak-claim, and review-gate signals.
+
+Key design docs:
+
+- `docs/agent_workflow_pipeline_v2_lindsay_handoff.md`: v2 handoff for the ten-agent trust-first pipeline, `row_scorer_v2`, geographic trust heatmap, and demo/product labels.
+- `app/lib/agents/SPEC.md`: implementation-facing agent contracts and state/persistence gaps.
 
 This repo is configured for local exploration of this Databricks workspace:
 

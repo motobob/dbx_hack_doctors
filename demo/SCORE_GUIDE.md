@@ -59,6 +59,22 @@ High score means fewer known blockers. Low score means the app should create cle
 
 **Demo line:** "Can a reviewer trace where this record came from?"
 
+## Row Readiness Score
+
+**Meaning:** deterministic row-level planning readiness from identity, location coherence, provenance, bloat/contamination, capability evidence, dedupe, and metadata validity.
+
+**Demo line:** "This is the score behind the heatmap. A/B rows are more countable; C/D rows should be reviewed before they affect planning."
+
+**V2 framing:** `row_scorer_v2` asks whether the row is coherent, evidenced, geospatially plausible, non-duplicative, and safe to count in planning.
+
+## Row Uncertainty Tier
+
+**Meaning:** A/B/C/D bucket derived from row readiness score and blocking reason codes.
+
+**Demo line:** "The heatmap turns uncertainty into geography, so we can see whether a region has trusted coverage or only noisy records."
+
+**Tier labels:** A = planning-ready, B = usable with caveats, C = review before planning, D = unsafe for planning.
+
 ## Import Readiness
 
 **Meaning:** percent of uploaded rows that have enough required fields to enter the pipeline without manual mapping.
