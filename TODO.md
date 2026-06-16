@@ -26,6 +26,7 @@ Top-level product setting:
 - The demo promise is: agents ingest and clean messy facility data, humans only proof/reject material findings, and the trusted resulting state produces the downstream risk planner.
 - The three-minute story should show current readiness numbers -> import/stage update -> agent workflow -> proof/reject actions -> risk recommendations.
 - MVP confidence is row-level: decide whether a facility row is trusted enough to count in planning. Field-level confidence is a later enhancement for high-value fields only.
+- Future-proof product direction: make the app white-labelable through dataset packs so another country/domain dataset, such as a Zimbabwe healthcare dataset, can reuse the same app shell with different source config, schema mapping, quality rules, agent specs, labels, and score guide.
 
 Core files:
 - `app/server.py`: FastAPI API + static React server. Includes pipeline endpoints.
@@ -38,17 +39,23 @@ Core files:
 - `app/lib/llm.py`: Databricks Foundation Models via OpenAI SDK (`/serving-endpoints`).
 - `app/lib/pipeline_state.py`: pipeline state shape, local JSON backend, Workspace API backend.
 - `app/lib/pipeline.py`: pipeline orchestrator — local asyncio mode + Databricks Job mode.
-- `app/lib/agents/`: eight-agent skeleton — IngestionManager, QAProfile, Dedup, EvidenceSpecialty, Geo, Shortage, HumanReviewGate, Risk.
-- `app/lib/agents/SPEC.md`: agent contracts, state shape, runtime modes, and DBX Job verification checklist.
+- `app/lib/agents/`: ten-agent skeleton — IngestionManager, QAProfile, PincodeIngestion, NfhsSurveyIngestion, Dedup, EvidenceSpecialty, Geo, Shortage, HumanReviewGate, Risk.
+- `app/lib/agents/SPEC.md`: integrated agent contracts, source workflow refs, state shape, runtime modes, and DBX Job verification checklist.
+- `agents/ingestion_agent.md`: merged fork rulebook for ingestion orchestration, cleaning, dedupe, review surface, and scoring.
+- `docs/facilities_data_quality.md`: merged fork field-cleaning, dedupe, geocoding, state mapping, and data-quality baseline.
+- `agents/pincode_ingestion_agent.md`: PIN directory orchestrator for post-office cleaning, coordinate parsing, PIN aggregation, ambiguity flags, and scoring.
+- `docs/pincode_data_quality.md`: PIN directory baseline, confidence tiers, ambiguity rules, and join-safe facility enrichment rules.
+- `agents/nfhs_survey_ingestion_agent.md`: NFHS-5 district survey orchestrator for schema, geography, indicator parsing, caveat flags, and ingestion scoring.
+- `docs/nfhs_survey_ingestion_data_quality.md`: NFHS baseline, suppressed/caution cell handling, district join-key rules, and survey-context guardrails.
 - `docs/design-session-2026-06-15-agent-architecture.md`: formatted transcript notes and target ingestion-led architecture.
 - `docs/demo-review-2026-06-15-current-state-import-actions.md`: formatted demo review transcript notes and UX decisions.
-- `app/jobs/run_agent.py`: Databricks Job task entrypoint for all eight agents.
+- `app/jobs/run_agent.py`: Databricks Job task entrypoint for all ten agents.
 - `app/sql/unity_catalog_state.sql`: Unity Catalog DDL for source, work, result, audit schemas.
 - `app/state/scratchpad.md`: seed Markdown scratchpad.
 - `app/state/last_run.json`: generated local parse state, gitignored.
 - `scripts/setup_dbx_job.py`: creates/updates the multi-task Databricks pipeline Job.
 - `scripts/create_demo_import.py`: regenerates the small XLSX demo import workbook.
-- `scripts/smoke_local_e2e.py`: local end-to-end smoke test for health/state, demo XLSX import preview, and the eight-agent pipeline.
+- `scripts/smoke_local_e2e.py`: local end-to-end smoke test for health/state, demo XLSX import preview, and the ten-agent pipeline.
 - `demo/data_readiness_demo_import.xlsx`: 12-row demo import file that triggers duplicate, sparse-field, weak-claim, and review-gate signals.
 - `run.sh`: dev/deploy helper — `ui | api | dev | deploy [name] | open [name]`.
 - `setup.sh`: teammate onboarding — venv, DBX profile, env setup.
@@ -67,6 +74,8 @@ flowchart TB
   setup[scripts/setup_dbx_job.py] --> jobs
   ddl[app/sql/unity_catalog_state.sql] --> uc[Unity Catalog]
   store --> uc
+  pack[dataset pack config] --> pipeline
+  pack --> frontend
 ```
 
 Completed/working now:
@@ -84,6 +93,7 @@ Completed/working now:
 - [x] Dataset preview order-by column and asc/desc UI.
 - [x] Dataset preview labels sample rows against total loaded rows.
 - [x] Dataset preview readiness flags render as colored chips: red missing/sparse, gray clustered, blue-gray ok/neutral.
+- [x] Percentage scores have tooltips/ARIA labels and a demo score guide at `demo/SCORE_GUIDE.md`.
 - [x] Recommendations/actions table with selected action detail.
 - [x] Upload preview API for CSV/XLS/XLSX.
 - [x] Mock re-parse flow regenerates profile/actions/risks.
@@ -102,27 +112,38 @@ Completed/working now:
 - [x] `run.sh` — ui / api / dev / deploy [name] / open [name].
 - [x] `setup.sh` — teammate onboarding (venv, DBX CLI, profile, .env).
 - [x] Databricks Apps deploy pipeline (sync + ensure_app state machine).
-- [x] Multi-agent AI pipeline skeleton — IngestionManager, QAProfile, Dedup, EvidenceSpecialty, Geo, Shortage, HumanReviewGate, Risk.
+- [x] Multi-agent AI pipeline skeleton — IngestionManager, QAProfile, PincodeIngestion, NfhsSurveyIngestion, Dedup, EvidenceSpecialty, Geo, Shortage, HumanReviewGate, Risk.
+- [x] `PincodeIngestionAgent` is now an actual runtime pipeline agent, not only a Markdown reference.
+- [x] `NfhsSurveyIngestionAgent` is now an actual runtime pipeline agent, not only a Markdown reference.
 - [x] Basic agent specs and pipeline state documented in `app/lib/agents/SPEC.md`.
+- [x] Sarah fork docs merged into main and promoted into the agent workflow contract.
+- [x] PIN directory ingestion/data-quality docs imported and promoted into the GeoAgent/PIN enrichment workflow contract.
+- [x] NFHS survey ingestion/data-quality docs imported and promoted into the survey-context workflow contract.
+- [x] Unity Catalog DDL placeholders added for clean post-office, one-row-per-PIN lookup, ambiguity flags, review queue, and PIN ingestion log.
+- [x] Unity Catalog DDL placeholders added for NFHS district indicators, indicator caveat flags, geography review queue, and NFHS ingestion log.
+- [x] Runtime agent results include workflow refs/rule families and pipeline cards display rule-family chips.
 - [x] Design session saved and linked: `docs/design-session-2026-06-15-agent-architecture.md`.
 - [x] Demo review transcript saved and linked: `docs/demo-review-2026-06-15-current-state-import-actions.md`.
 - [x] Dual pipeline mode: local asyncio (default) + Databricks multi-task Job.
 - [x] DedupAgent ingest mode — compares uploaded records against existing dataset.
 - [x] Pipeline state API: `POST /api/pipeline/start`, `GET /api/pipeline/status[/{id}]`.
 - [x] Pipeline status panel in UI with per-agent cards and 3-second polling.
-- [x] "Run ingestion pipeline" button in Import panel — passes uploaded records into the eight-agent ingestion workflow.
+- [x] "Run ingestion pipeline" button in Import panel — passes uploaded records into the ten-agent ingestion workflow.
 - [x] LLM via Databricks Foundation Models (`/serving-endpoints`, OpenAI-compatible).
 - [x] Databricks Job setup script (`scripts/setup_dbx_job.py`).
-- [x] Local revalidation on 2026-06-15: Python compile, Vite build, and local eight-agent pipeline smoke all pass.
+- [x] Local revalidation on 2026-06-15: Python compile, Vite build, and local ten-agent pipeline smoke all pass.
 - [x] Demo import XLSX generated from checked-in source data with intentional duplicate/sparse/weak-claim variations.
 - [x] Demo folder filled with narrative, three-minute script, checklist, and import workbook references.
-- [x] Import-driven pipeline smoke passes with demo XLSX: 12 incoming rows, 4 duplicate decisions, 3 row-quality flags, 30 review items.
+- [x] Import-driven pipeline smoke passes with demo XLSX: 12 incoming rows, PIN/NFHS guardrails, 4 duplicate decisions, 3 row-quality flags, 30+ review items.
 - [x] Local API-style E2E smoke test added and passing: `scripts/smoke_local_e2e.py`.
 - [x] KPI cards on `Current State` are clickable and navigate into filtered `Actions`.
 - [x] Four-tab UI deployed to Databricks Apps on 2026-06-15.
 - [x] Databricks multi-task Job created: `590750946177761`.
 - [x] Deployed app data-load fix validated locally against configured DBX host/warehouse/source: 10,000 rows, 51 columns, `backend=live`, `fallback=False`.
-- [ ] Databricks Job validation: latest run failed at `ingestion`; downstream tasks were skipped.
+- [x] Databricks Job ingestion failure diagnosed on run `92661075111108`: Spark Python task did not define `__file__` in `app/jobs/run_agent.py`.
+- [x] Databricks Job entrypoint patched to resolve app path without `__file__`.
+- [x] Databricks Job source read patched to use Spark `collect()` in job mode instead of Databricks SQL connector Arrow fetch.
+- [ ] Databricks Job validation: latest run `255341043566317` still failed at `ingestion`; downstream tasks were skipped. Fetch task output before the next fix.
 - [ ] Databricks Job mode deployed and verified end-to-end.
 
 ## Priority Next Actions
@@ -135,7 +156,8 @@ flowchart LR
   uc --> perms[P0 DBX permissions]
   perms --> smoke[P0 deploy smoke]
   smoke --> persist[P1 pipeline persistence]
-  persist --> risk[P1 RiskAgent UI]
+  persist --> packs[P1 dataset packs]
+  packs --> risk[P1 RiskAgent UI]
   risk --> importStage[P1 import staging]
   importStage --> polish[P2 UX polish]
 ```
@@ -154,11 +176,15 @@ flowchart LR
 - [x] **P0 actionable queue:** add clickable queue lanes, selected-action next steps, status-aware decision buttons, and risk-to-actions handoff.
 - [x] **P0 DBX data-load fix:** disable SQL cloud fetch, prewarm state cache, increase timeout, and disable silent DBX fallback.
 - [ ] **P1 pipeline persistence:** persist agent outputs from `app/lib/agents/` into Unity Catalog work/result tables.
+- [ ] **P1 white-label dataset packs:** move hardcoded dataset labels/config/rules into pack definitions for India DAIS and future datasets.
 - [x] **P1 target agents:** add skeleton Ingestion Manager, QA/Profile Agent, Evidence/Specialty Agent, and Human Review Gate.
 - [x] **P1 proof/reject UX:** turn HumanReviewGate output into explicit Accept / Reject / Needs evidence controls.
 - [x] **P1 action comments:** add required/free-text comment capture for accepted/rejected actions.
 - [ ] **P1 risk UI:** wire RiskAgent output into the `Risk Recommendations` tab instead of mock rows.
 - [ ] **P1 import staging:** add `POST /api/import/stage` and stage uploaded rows into source/work tables.
+- [ ] **P1 PIN enrichment implementation:** build `pincode_post_offices_clean`, `pincode_lookup_clean`, `pincode_ambiguity_flags`, and facility enrichment joins against lookup only.
+- [ ] **P1 NFHS survey implementation:** build `nfhs_district_indicators_clean`, `nfhs_indicator_quality_flags`, `nfhs_geography_review_queue`, and district-context joins with normalized keys only.
+- [ ] **P1 Zimbabwe/import-other-dataset path:** define a sample non-India dataset pack contract and prove import/stage can map it into the canonical state without code changes.
 - [ ] **P2 UX polish:** split React components, add table pagination, add toasts, and add remaining confidence/status chips.
 
 ## Phase 1: Make the Skeleton Feel Great
@@ -341,6 +367,8 @@ Remaining agent work:
 - [ ] Persist agent outputs to Unity Catalog after pipeline completes:
   - [ ] IngestionManagerAgent → `source.raw_uploaded_files` / `source.raw_uploaded_rows`
   - [ ] QAProfileAgent → `work.data_quality_findings`
+  - [ ] PincodeIngestionAgent → `work.pincode_post_offices_clean` / `work.pincode_lookup_clean` / `work.pincode_ambiguity_flags` / `work.pincode_review_queue` / `audit.pincode_ingestion_log`
+  - [ ] NfhsSurveyIngestionAgent → `work.nfhs_district_indicators_clean` / `work.nfhs_indicator_quality_flags` / `work.nfhs_geography_review_queue` / `audit.nfhs_ingestion_log`
   - [ ] DedupAgent → `work.facility_duplicate_candidates`
   - [ ] EvidenceSpecialtyAgent → `work.facility_capability_evidence`
   - [ ] GeoAgent → `work.data_quality_findings` (geo section)
@@ -353,7 +381,10 @@ Remaining agent work:
 - [ ] Add retry for failed pipeline runs.
 - [ ] Add `GET /api/pipeline/history` to list past runs.
 - [ ] Test Databricks Job mode end-to-end (requires `setup_dbx_job.py` run + deploy).
-- [ ] Debug Databricks Job ingestion task failure from run `668291840520725`.
+- [x] Debug Databricks Job ingestion task failure from run `92661075111108`: Spark task execution did not define `__file__`.
+- [x] Debug Databricks Job ingestion task failure from run `833931391689439`: Databricks SQL connector hit a job-cluster PyArrow mismatch.
+- [x] Patch Databricks Job source loading to read via Spark `collect()` and avoid SQL/Arrow result conversion.
+- [ ] Re-run/fetch Databricks Job validation output for latest failed run `255341043566317`.
 - [ ] After job setup, update deployed env:
   - [ ] `PIPELINE_MODE=databricks`
   - [x] `DATABRICKS_PIPELINE_JOB_ID=590750946177761`
@@ -370,13 +401,13 @@ Latest validation:
 
 - [x] Python compile passes for `app/server.py`, `app/lib`, `app/jobs`, and `scripts/setup_dbx_job.py`.
 - [x] Frontend production build passes with `npm run build`.
-- [x] Local skeleton pipeline completes all eight agents: `ingestion`, `qa`, `dedup`, `evidence`, `geo`, `shortage`, `review`, `risk`.
+- [x] Local skeleton pipeline completes all ten agents: `ingestion`, `qa`, `pincode`, `nfhs`, `dedup`, `evidence`, `geo`, `shortage`, `review`, `risk`.
 - [x] Local end-to-end smoke passes:
   ```bash
   .venv/bin/python scripts/smoke_local_e2e.py
   ```
   Expected marker: `LOCAL_E2E_SMOKE_OK`.
-- [ ] Databricks multi-task Job exists but is not validated: run `668291840520725` failed at `ingestion`.
+- [ ] Databricks multi-task Job exists but is not validated: latest run `255341043566317` still failed at `ingestion`; task output still needs inspection.
 
 ## Phase 7: AI Evidence Extraction
 

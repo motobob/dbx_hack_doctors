@@ -1,7 +1,7 @@
 """
 Pipeline orchestrator.
 
-DAG: ingestion → qa → dedup + evidence + geo → shortage → review → risk
+DAG: ingestion → qa → pincode + nfhs + dedup + evidence + geo → shortage → review → risk
 
 Two execution modes (PIPELINE_MODE env var):
   local       — asyncio tasks in the FastAPI process (default)
@@ -23,6 +23,8 @@ from .agents import (
     GeoAgent,
     HumanReviewGateAgent,
     IngestionManagerAgent,
+    NfhsSurveyIngestionAgent,
+    PincodeIngestionAgent,
     QAProfileAgent,
     RiskAgent,
     ShortageAgent,
@@ -70,6 +72,12 @@ async def _run_pipeline_local(pipeline_id: str) -> None:
 
         qa_result = await loop.run_in_executor(None, _run_agent_sync, QAProfileAgent(), df, state, upstream)
         upstream["qa"] = qa_result
+
+        pincode_result = await loop.run_in_executor(None, _run_agent_sync, PincodeIngestionAgent(), df, state, upstream)
+        upstream["pincode"] = pincode_result
+
+        nfhs_result = await loop.run_in_executor(None, _run_agent_sync, NfhsSurveyIngestionAgent(), df, state, upstream)
+        upstream["nfhs"] = nfhs_result
 
         # ── stage 2: dedup + evidence + geo ───────────────────────────────
         dedup_result = await loop.run_in_executor(None, _run_agent_sync, DedupAgent(), df, state, dict(upstream))
@@ -134,6 +142,8 @@ async def _poll_databricks_job(pipeline_id: str, run_id: str) -> None:
     task_to_agent = {
         "ingestion": "ingestion",
         "qa": "qa",
+        "pincode": "pincode",
+        "nfhs": "nfhs",
         "dedup": "dedup",
         "evidence": "evidence",
         "geo": "geo",

@@ -10,6 +10,13 @@ from .base import BaseAgent
 
 class QAProfileAgent(BaseAgent):
     name = "qa"
+    workflow_ref = "docs/facilities_data_quality.md#2-cleaning-rules-field-by-field"
+    rule_families = [
+        "field completeness",
+        "sparse groups",
+        "metadata validity",
+        "review flags",
+    ]
 
     def _execute(self, df: pd.DataFrame, upstream: dict[str, Any]) -> dict:
         fields = {

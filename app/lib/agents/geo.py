@@ -1,5 +1,5 @@
 """
-GeoAgent — validates geographic data quality and identifies anomalies.
+GeoAgent — validates geographic data quality, PIN enrichment safety, and anomalies.
 
 Input : full facilities DataFrame + dedup results (upstream)
 Output: geo quality report with flagged records and coverage gaps
@@ -20,6 +20,8 @@ Identify:
 2. Records with likely incorrect or swapped coordinates
 3. States with suspiciously low facility density relative to population size
 4. Geographic coverage gaps (states/districts with no facilities)
+5. PIN-code enrichment ambiguity. A PIN code is not a district key; do not treat
+   raw post-office-grain rows as a one-row-per-PIN lookup.
 
 Return ONLY valid JSON in this exact shape:
 {
@@ -49,6 +51,13 @@ Return ONLY valid JSON in this exact shape:
 
 class GeoAgent(BaseAgent):
     name = "geo"
+    workflow_ref = "docs/pincode_data_quality.md#5-recommended-join-rules-for-facilities"
+    rule_families = [
+        "India bounds",
+        "PIN lookup tier",
+        "ambiguity flags",
+        "coverage gaps",
+    ]
 
     def _execute(self, df: pd.DataFrame, upstream: dict[str, Any]) -> dict:
         state_col = "address_stateOrRegion"

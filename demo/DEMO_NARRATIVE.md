@@ -53,6 +53,8 @@ The agents separate three classes of work:
 - **human review:** contradictory claims, ambiguous duplicates, weak capability evidence, and planning-critical changes
 - **risk synthesis:** care-gap recommendations that account for confidence and data quality
 
+For geography, the app treats the India Post PIN directory as an assist layer, not ground truth. A PIN code is not a district key: the workflow creates a one-row-per-PIN lookup with confidence tiers and ambiguity flags before facilities use it for enrichment.
+
 ## Why This Matters
 
 Without the trust layer, a planner may over-count duplicate facilities, trust weak capability claims, or confuse data-poor regions with true medical deserts.

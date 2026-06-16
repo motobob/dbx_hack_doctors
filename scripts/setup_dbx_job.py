@@ -3,7 +3,7 @@
 Creates (or updates) the Databricks multi-task pipeline Job.
 
 DAG:
-  ingestion → qa → dedup + evidence + geo → shortage → review → risk
+  ingestion → qa → pincode + nfhs + dedup + evidence + geo → shortage → review → risk
 
 Run once after deploy:
     python scripts/setup_dbx_job.py
@@ -76,10 +76,12 @@ def build_job_settings() -> JobSettings:
         tasks=[
             task("ingestion"),
             task("qa",        depends_on=["ingestion"]),
+            task("pincode",   depends_on=["qa"]),
+            task("nfhs",      depends_on=["qa"]),
             task("dedup",     depends_on=["qa"]),
             task("evidence",  depends_on=["qa"]),
-            task("geo",       depends_on=["qa"]),
-            task("shortage",  depends_on=["dedup", "evidence", "geo"]),
+            task("geo",       depends_on=["qa", "pincode"]),
+            task("shortage",  depends_on=["dedup", "evidence", "geo", "nfhs"]),
             task("review",    depends_on=["dedup", "evidence", "geo", "shortage"]),
             task("risk",      depends_on=["review"]),
         ],

@@ -10,11 +10,19 @@ from .base import BaseAgent
 
 class HumanReviewGateAgent(BaseAgent):
     name = "review"
+    workflow_ref = "agents/ingestion_agent.md#5-sub-agent-c--review-surface-agent"
+    rule_families = [
+        "proof/reject queue",
+        "material changes",
+        "human ownership",
+        "audit notes",
+    ]
 
     def _execute(self, df: pd.DataFrame, upstream: dict[str, Any]) -> dict:
         items: list[dict[str, Any]] = []
         ingestion = upstream.get("ingestion", {})
         qa = upstream.get("qa", {})
+        pincode = upstream.get("pincode", {})
         dedup = upstream.get("dedup", {})
         evidence = upstream.get("evidence", {})
         geo = upstream.get("geo", {})
@@ -39,6 +47,16 @@ class HumanReviewGateAgent(BaseAgent):
         for flag in qa.get("flags", [])[:20]:
             if flag.get("severity") in {"high", "medium"}:
                 items.append({"reason": flag.get("issue"), "severity": flag.get("severity"), "detail": str(flag)})
+
+        for item in pincode.get("review_items", [])[:20]:
+            items.append(
+                {
+                    "reason": item.get("issue", "pincode_enrichment_review"),
+                    "severity": item.get("severity", "medium"),
+                    "detail": item.get("recommendation", str(item)),
+                    "pincode": item.get("pin_value"),
+                }
+            )
 
         for cluster in dedup.get("clusters", [])[:20]:
             if cluster.get("decision") == "review" or cluster.get("confidence") in {"low", "medium"}:

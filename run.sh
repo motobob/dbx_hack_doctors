@@ -25,13 +25,39 @@ fi
 usage() {
   echo "Usage: $0 <command> [options]"
   echo ""
-  echo "  ui                Run frontend dev server (Vite, port 5173)"
-  echo "  api               Run API server (uvicorn, port 8000, --reload)"
+  echo "  ui                Run frontend dev server (Vite, port 5173 or next free port)"
+  echo "  api               Run API server (uvicorn, port 8000 or next free port, --reload)"
   echo "  dev               Run both UI and API locally in parallel"
   echo "  deploy [name]     Build + push to Databricks Apps"
   echo "                    Omit [name] → use DATABRICKS_APP_NAME from .env"
   echo "                    Pass [name] → deploy a separate named copy"
   echo "  open [name]       Print + open the deployed app URL in the browser"
+  exit 1
+}
+
+is_port_free() {
+  "$PYTHON" - "$1" <<'PY'
+import socket
+import sys
+
+port = int(sys.argv[1])
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.settimeout(0.2)
+    sys.exit(0 if sock.connect_ex(("127.0.0.1", port)) else 1)
+PY
+}
+
+free_port() {
+  local start="${1:-8000}"
+  local port="$start"
+  while [ "$port" -lt $((start + 50)) ]; do
+    if is_port_free "$port"; then
+      echo "$port"
+      return 0
+    fi
+    port=$((port + 1))
+  done
+  echo "ERROR: no free port found in range $start-$((start + 49))" >&2
   exit 1
 }
 
@@ -120,23 +146,48 @@ ensure_app() {
 
 # ── commands ─────────────────────────────────────────────────────────────────
 run_ui() {
+  local ui_port="${UI_PORT:-${APP_UI_PORT:-}}"
+  if [ -z "$ui_port" ]; then
+    ui_port="$(free_port 5173)"
+  fi
+  local api_port="${API_PORT:-${APP_API_PORT:-8000}}"
+  local api_target="${VITE_API_TARGET:-http://127.0.0.1:$api_port}"
   echo ">>> Starting UI dev server..."
+  echo ">>> UI:  http://127.0.0.1:$ui_port"
+  echo ">>> Vite /api proxy: $api_target"
   cd "$FRONTEND_DIR"
   npm install --silent
-  npm run dev
+  VITE_API_TARGET="$api_target" npm run dev -- --host 127.0.0.1 --port "$ui_port"
 }
 
 run_api() {
+  local api_port="${API_PORT:-${APP_API_PORT:-}}"
+  if [ -z "$api_port" ]; then
+    api_port="$(free_port 8000)"
+  fi
   echo ">>> Starting API server..."
+  echo ">>> API: http://127.0.0.1:$api_port"
   cd "$APP_DIR"
-  "$PYTHON" -m uvicorn server:app --host 0.0.0.0 --port 8000 --reload
+  "$PYTHON" -m uvicorn server:app --host 0.0.0.0 --port "$api_port" --reload
 }
 
 run_dev() {
+  local ui_port="${UI_PORT:-${APP_UI_PORT:-}}"
+  if [ -z "$ui_port" ]; then
+    ui_port="$(free_port 5173)"
+  fi
+  local api_port="${API_PORT:-${APP_API_PORT:-}}"
+  if [ -z "$api_port" ]; then
+    api_port="$(free_port 8000)"
+  fi
+  local api_target="http://127.0.0.1:$api_port"
   echo ">>> Starting UI + API (Ctrl-C stops both)..."
+  echo ">>> UI:  http://127.0.0.1:$ui_port"
+  echo ">>> API: $api_target"
+  echo ">>> Vite /api proxy: $api_target"
   trap 'kill 0' INT TERM EXIT
-  (cd "$FRONTEND_DIR" && npm install --silent && npm run dev) &
-  (cd "$APP_DIR" && "$PYTHON" -m uvicorn server:app --host 0.0.0.0 --port 8000 --reload) &
+  (cd "$FRONTEND_DIR" && npm install --silent && VITE_API_TARGET="$api_target" npm run dev -- --host 127.0.0.1 --port "$ui_port") &
+  (cd "$APP_DIR" && "$PYTHON" -m uvicorn server:app --host 0.0.0.0 --port "$api_port" --reload) &
   wait
 }
 

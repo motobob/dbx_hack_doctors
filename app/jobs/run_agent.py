@@ -16,17 +16,6 @@ import os
 import sys
 from pathlib import Path
 
-# Ensure app/ is on sys.path regardless of CWD
-APP_DIR = Path(__file__).resolve().parent.parent
-if str(APP_DIR) not in sys.path:
-    sys.path.insert(0, str(APP_DIR))
-
-import pandas as pd
-
-from lib import pipeline_state as ps
-from lib.store import read_facilities
-
-
 DEFAULT_JOB_ENV = {
     "APP_DATA_MODE": "unity_catalog",
     "APP_SOURCE_MODE": "unity_catalog",
@@ -41,12 +30,60 @@ DEFAULT_JOB_ENV = {
     "APP_SOURCE_ROW_LIMIT": "10000",
     "APP_STATE_FALLBACK_ON_ERROR": "true",
     "AGENT_LLM_ENABLED": "false",
+    "DATABRICKS_SQL_USE_CLOUD_FETCH": "false",
+    "DATABRICKS_JOB_USE_SPARK_SOURCE": "true",
 }
+
+
+def _app_dir() -> Path:
+    """Resolve app/ when Databricks Spark Python task does not define __file__."""
+    if "__file__" in globals():
+        return Path(__file__).resolve().parent.parent
+    workspace_path = os.getenv("DATABRICKS_WORKSPACE_PATH") or DEFAULT_JOB_ENV["DATABRICKS_WORKSPACE_PATH"]
+    if workspace_path:
+        return Path(workspace_path)
+    return Path.cwd()
+
+
+# Ensure app/ is on sys.path regardless of CWD.
+APP_DIR = _app_dir()
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
+
+import pandas as pd
+
+from lib import pipeline_state as ps
+from lib.store import read_facilities
 
 
 def configure_job_env() -> None:
     for key, value in DEFAULT_JOB_ENV.items():
         os.environ.setdefault(key, value)
+
+
+def _spark_source_table() -> str:
+    catalog = os.getenv("APP_SOURCE_CATALOG") or os.getenv("DATABRICKS_CATALOG")
+    schema = os.getenv("APP_SOURCE_SCHEMA") or os.getenv("DATABRICKS_SCHEMA")
+    table = os.getenv("APP_SOURCE_TABLE", "facilities")
+    if not catalog or not schema or not table:
+        raise RuntimeError("Missing APP_SOURCE_CATALOG, APP_SOURCE_SCHEMA, or APP_SOURCE_TABLE.")
+    return f"`{catalog}`.`{schema}`.`{table}`"
+
+
+def read_facilities_for_job() -> pd.DataFrame:
+    if os.getenv("DATABRICKS_JOB_USE_SPARK_SOURCE", "true").strip().lower() in {"0", "false", "no", "off"}:
+        return read_facilities()
+
+    try:
+        from pyspark.sql import SparkSession
+
+        spark = SparkSession.getActiveSession() or SparkSession.builder.getOrCreate()
+        limit = int(os.getenv("APP_SOURCE_ROW_LIMIT", "10000"))
+        rows = spark.table(_spark_source_table()).limit(limit).collect()
+        return pd.DataFrame([row.asDict(recursive=True) for row in rows])
+    except Exception as exc:
+        print(f"[job] Spark source read failed, falling back to SQL connector: {type(exc).__name__}: {exc}")
+        return read_facilities()
 
 
 def main() -> None:
@@ -66,7 +103,7 @@ def main() -> None:
 
     # Load state from workspace (written by FastAPI when job was triggered)
     state = ps.workspace_load(pipeline_id) or ps.new_pipeline(pipeline_id)
-    df = read_facilities()
+    df = read_facilities_for_job()
 
     # Collect upstream results from already-completed agents
     upstream: dict = {}
@@ -90,6 +127,8 @@ def _get_agent(name: str):
         GeoAgent,
         HumanReviewGateAgent,
         IngestionManagerAgent,
+        NfhsSurveyIngestionAgent,
+        PincodeIngestionAgent,
         QAProfileAgent,
         RiskAgent,
         ShortageAgent,
@@ -98,6 +137,8 @@ def _get_agent(name: str):
     agents = {
         "ingestion": IngestionManagerAgent,
         "qa": QAProfileAgent,
+        "pincode": PincodeIngestionAgent,
+        "nfhs": NfhsSurveyIngestionAgent,
         "dedup": DedupAgent,
         "evidence": EvidenceSpecialtyAgent,
         "geo": GeoAgent,

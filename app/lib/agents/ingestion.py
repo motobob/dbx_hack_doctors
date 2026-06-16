@@ -10,6 +10,13 @@ from .base import BaseAgent
 
 class IngestionManagerAgent(BaseAgent):
     name = "ingestion"
+    workflow_ref = "agents/ingestion_agent.md#3-sub-agent-a--alignment--cleaning-agent"
+    rule_families = [
+        "scraper corruption",
+        "field typing",
+        "state mapping",
+        "coordinate repair",
+    ]
 
     def _execute(self, df: pd.DataFrame, upstream: dict[str, Any]) -> dict:
         incoming = upstream.get("incoming_records") or []

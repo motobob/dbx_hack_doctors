@@ -455,6 +455,123 @@ button.primary:hover {
   line-height: 1.1;
 }
 
+.score-label > span,
+.metric-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.info-tip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px;
+  height: 17px;
+  border: 1px solid var(--gray-lines);
+  border-radius: 999px;
+  color: var(--gray-text);
+  background: var(--oat-light);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  cursor: help;
+  flex: 0 0 auto;
+}
+
+.info-tip:focus-visible {
+  outline: 2px solid var(--blue-600);
+  outline-offset: 2px;
+}
+
+.score-explainer {
+  color: var(--gray-text);
+  font-size: 13px;
+  line-height: 1.35;
+  margin: 10px 0 0;
+}
+
+.cta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.cta-row button {
+  min-width: 135px;
+}
+
+.mission-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.mission-action {
+  display: flex;
+  min-height: 112px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 6px;
+  border-radius: 8px;
+  padding: 12px;
+  text-align: left;
+  background: #fff;
+  border-color: var(--gray-lines);
+}
+
+.mission-action:hover {
+  border-color: var(--blue-600);
+  box-shadow: 0 0 0 3px rgba(34, 114, 180, 0.11);
+}
+
+.mission-action strong {
+  font-size: 15px;
+  line-height: 1.2;
+}
+
+.mission-action span:last-child {
+  color: var(--gray-text);
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.mission-action-label {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: var(--oat-medium);
+  color: var(--gray-navigation);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.mission-action-primary,
+.mission-action-risk {
+  border-color: var(--lava-600);
+}
+
+.mission-action-primary .mission-action-label,
+.mission-action-risk .mission-action-label {
+  background: var(--lava-600);
+  color: #fff;
+}
+
+.mission-action-warn {
+  border-color: var(--yellow-600);
+}
+
+.mission-action-warn .mission-action-label {
+  background: #fff4d2;
+  color: var(--navy-900);
+}
+
 .bar {
   height: 8px;
   border-radius: 99px;
@@ -814,6 +931,7 @@ dd {
   .detail-panel,
   .metric-grid,
   .mini-grid,
+  .mission-actions,
   .queue-summary,
   .queue-lanes,
   .pipeline {
@@ -874,6 +992,30 @@ dd {
   font-size: 12px;
   color: var(--gray-text);
   margin: 4px 0 0;
+}
+
+.agent-detail .info-tip {
+  margin-left: 5px;
+  vertical-align: middle;
+}
+
+.agent-rules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 6px 0 2px;
+}
+
+.agent-rules span {
+  border: 1px solid var(--gray-lines);
+  border-radius: 999px;
+  color: var(--gray-text);
+  background: var(--oat-light);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+  max-width: 100%;
+  padding: 4px 7px;
 }
 
 .agent-error {

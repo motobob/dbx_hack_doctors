@@ -12,6 +12,8 @@ from .. import pipeline_state as ps
 
 class BaseAgent:
     name: str = "base"
+    workflow_ref: str = "app/lib/agents/SPEC.md"
+    rule_families: list[str] = []
 
     def __init__(self):
         self._client = None  # lazy — avoids import errors when LLM not needed
@@ -33,6 +35,9 @@ class BaseAgent:
         ps.save(state)
         try:
             result = self._execute(df, upstream or {})
+            if isinstance(result, dict):
+                result.setdefault("workflow_ref", self.workflow_ref)
+                result.setdefault("rule_families", self.rule_families)
             ps.finish_agent(state, self.name, result=result)
             ps.save(state)
             return result

@@ -4,6 +4,31 @@ import "./styles.css";
 
 const tabs = ["Current State", "Import + Pipeline", "Actions", "Risk Recommendations"];
 
+const SCORE_DEFINITIONS = {
+  "Data consistency":
+    "Weighted readiness score for the current resulting state. Formula: 25% completeness, 20% dedupe health, 20% contradiction safety, 15% location quality, 10% evidence quality, 10% provenance. Higher means safer to use for planning.",
+  Completeness:
+    "Percent of records with the minimum planning fields populated: facility name, at least city or state, and description. Gaps here mean the row is hard to use.",
+  "Dedupe health":
+    "Percent of rows not sitting inside duplicate clusters. Lower means duplicate facilities may inflate coverage and make regions look better served than they are.",
+  Contradictions:
+    "Estimated share of records without suspicious capability conflicts. Lower means claims like ICU/NICU/emergency may disagree with the evidence and need review.",
+  "Location quality":
+    "Percent of records with city, state, and PIN populated. Lower means geography-based planning may confuse real care gaps with missing location data.",
+  "Evidence quality":
+    "Percent of records with both descriptive text and capability/specialty evidence. Lower means clinical claims are weakly supported.",
+  Provenance:
+    "Percent of records with a source value. Lower means reviewers have less traceability when deciding whether to trust the record.",
+  "Import readiness":
+    "Percent of uploaded rows that have enough required fields to enter the agent pipeline without manual column mapping first.",
+  "QA quality":
+    "Average completeness score across identity, location, capability, provenance, and metadata groups in the QA agent output.",
+  "Data readiness":
+    "Risk agent roll-up of whether the dataset is clean enough to trust after dedupe, evidence, geo, shortage, and review checks.",
+  "Planning readiness":
+    "Risk agent estimate of whether the resulting state is safe enough to use for allocation or medical desert planning.",
+};
+
 function formatBadgeValue(value) {
   const number = Number(value || 0);
   if (number > 99) return "99+";
@@ -30,11 +55,28 @@ async function api(path, options = {}, timeoutMs = 25000) {
   return response.json();
 }
 
-function Metric({ label, value, detail, tone = "neutral", onClick }) {
+function InfoTip({ text }) {
+  if (!text) return null;
+  return (
+    <span className="info-tip" title={text} aria-label={text} tabIndex={0}>
+      i
+    </span>
+  );
+}
+
+function Metric({ label, value, detail, tone = "neutral", onClick, tooltip }) {
   const Tag = onClick ? "button" : "div";
   return (
-    <Tag className={`metric metric-${tone} ${onClick ? "metric-clickable" : ""}`} onClick={onClick}>
-      <div className="metric-label">{label}</div>
+    <Tag
+      className={`metric metric-${tone} ${onClick ? "metric-clickable" : ""}`}
+      onClick={onClick}
+      title={tooltip}
+      aria-label={tooltip ? `${label}: ${value}. ${tooltip}` : undefined}
+    >
+      <div className="metric-label">
+        <span>{label}</span>
+        <InfoTip text={tooltip} />
+      </div>
       <div className="metric-value">{value}</div>
       {detail ? <div className="metric-detail">{detail}</div> : null}
     </Tag>
@@ -42,10 +84,14 @@ function Metric({ label, value, detail, tone = "neutral", onClick }) {
 }
 
 function ScoreBar({ label, value }) {
+  const tooltip = SCORE_DEFINITIONS[label];
   return (
-    <div className="score-row">
+    <div className="score-row" title={tooltip} aria-label={`${label}: ${value}%. ${tooltip || ""}`}>
       <div className="score-label">
-        <span>{label}</span>
+        <span>
+          {label}
+          <InfoTip text={tooltip} />
+        </span>
         <b>{value}%</b>
       </div>
       <div className="bar">
@@ -222,6 +268,54 @@ function CurrentState({ state, onActionJump }) {
     }));
   }
 
+  const ctaCards = [
+    {
+      key: "human",
+      title: `Proof/reject ${profile.human_review_queue.toLocaleString()} review item${profile.human_review_queue === 1 ? "" : "s"}`,
+      detail: "Human decisions can change the trusted resulting state and planning counts.",
+      button: "Open human review",
+      tone: "risk",
+      filters: { issue: "All", status: "Needs review", owner: "Human" },
+      show: profile.human_review_queue > 0,
+    },
+    {
+      key: "dedupe",
+      title: `Resolve ${profile.duplicate_clusters.toLocaleString()} duplicate cluster${profile.duplicate_clusters === 1 ? "" : "s"}`,
+      detail: "Merge or reject duplicates before facility counts are used for coverage.",
+      button: "Open dedupe queue",
+      tone: "warn",
+      filters: { issue: "Duplicate cluster", status: "All", owner: "All" },
+      show: profile.duplicate_clusters > 0,
+    },
+    {
+      key: "location",
+      title: `Repair ${profile.sparse_locations.toLocaleString()} sparse location${profile.sparse_locations === 1 ? "" : "s"}`,
+      detail: "Fix missing PIN/city/state before geography turns into a false care gap.",
+      button: "Open location fixes",
+      tone: "neutral",
+      filters: { issue: "Location quality", status: "All", owner: "All" },
+      show: profile.sparse_locations > 0,
+    },
+    {
+      key: "contradictions",
+      title: `Review ${Math.max(0, 100 - Number(components.Contradictions || 100))} pts of contradiction risk`,
+      detail: "Check facility claims where structured fields and evidence may disagree.",
+      button: "Open evidence review",
+      tone: "risk",
+      filters: { issue: "Capability evidence", status: "All", owner: "Human" },
+      show: Number(components.Contradictions || 100) < 95,
+    },
+    {
+      key: "evidence",
+      title: `Verify ${Math.max(0, 100 - Number(components["Evidence quality"] || 100))} pts of weak evidence`,
+      detail: "Confirm planning-critical claims like ICU, NICU, emergency, maternity, and oncology.",
+      button: "Open claim review",
+      tone: "neutral",
+      filters: { issue: "NICU review", status: "All", owner: "Human" },
+      show: Number(components["Evidence quality"] || 100) < 95,
+    },
+  ].filter((card) => card.show).slice(0, 4);
+
   return (
     <section className="page-grid">
       <div className="full">
@@ -231,6 +325,7 @@ function CurrentState({ state, onActionJump }) {
             value={`${profile.consistency_score}%`}
             detail={`+${profile.expected_lift} pts possible · open all actions`}
             tone="warn"
+            tooltip={SCORE_DEFINITIONS["Data consistency"]}
             onClick={() => onActionJump({ issue: "All", status: "All", owner: "All" })}
           />
           <Metric
@@ -273,6 +368,28 @@ function CurrentState({ state, onActionJump }) {
             <ScoreBar key={label} label={label} value={value} />
           ))}
         </div>
+        <p className="score-explainer">
+          Scores are triage signals. Use the next actions below to move from diagnosis to proof/reject work.
+        </p>
+        <div className="mission-actions" aria-label="Mission Control next actions">
+          {ctaCards.length ? ctaCards.map((card, index) => (
+            <button
+              key={card.key}
+              className={`mission-action mission-action-${card.tone} ${index === 0 ? "mission-action-primary" : ""}`}
+              onClick={() => onActionJump(card.filters)}
+            >
+              <span className="mission-action-label">{card.button}</span>
+              <strong>{card.title}</strong>
+              <span>{card.detail}</span>
+            </button>
+          )) : (
+            <button className="mission-action mission-action-primary" onClick={() => onActionJump({ issue: "All", status: "All", owner: "All" })}>
+              <span className="mission-action-label">Inspect actions</span>
+              <strong>No urgent CTA from current scores</strong>
+              <span>Open the action queue to review lower-priority recommendations and audit state.</span>
+            </button>
+          )}
+        </div>
         <div className="tag-line">
           {(profile.tags || []).length ? profile.tags.map((tag) => <span key={tag}>#{tag}</span>) : <span>No tags yet</span>}
         </div>
@@ -281,8 +398,8 @@ function CurrentState({ state, onActionJump }) {
       <div className="panel">
         <div className="panel-head">
           <div>
-            <h2>What This Means</h2>
-            <p>These numbers are navigation into the work queue, not passive KPIs.</p>
+            <h2>Recommended Queues</h2>
+            <p>Fast paths into the cleanup work behind the readiness scores.</p>
           </div>
         </div>
         <div className="callout-list">
@@ -339,10 +456,12 @@ function CurrentState({ state, onActionJump }) {
   );
 }
 
-const AGENT_NAMES = ["ingestion", "qa", "dedup", "evidence", "geo", "shortage", "review", "risk"];
+const AGENT_NAMES = ["ingestion", "qa", "pincode", "nfhs", "dedup", "evidence", "geo", "shortage", "review", "risk"];
 const AGENT_LABELS = {
   ingestion: "Ingest",
   qa: "QA profile",
+  pincode: "PIN lookup",
+  nfhs: "NFHS survey",
   dedup: "De-dup",
   evidence: "Evidence",
   geo: "Geo filter",
@@ -356,12 +475,20 @@ function AgentCard({ name, agentState }) {
   const status = agentState?.status || "pending";
   const tone = STATUS_TONE[status] || "neutral";
   const result = agentState?.result || {};
+  const ruleFamilies = Array.isArray(result.rule_families) ? result.rule_families.slice(0, 4) : [];
   return (
     <div className={`agent-card agent-${tone}`}>
       <div className="agent-header">
         <b>{AGENT_LABELS[name]}</b>
         <span className={`badge badge-${tone}`}>{status}</span>
       </div>
+      {ruleFamilies.length ? (
+        <div className="agent-rules" aria-label={`${AGENT_LABELS[name]} workflow rules`}>
+          {ruleFamilies.map((rule) => (
+            <span key={rule}>{rule}</span>
+          ))}
+        </div>
+      ) : null}
       {agentState?.error ? <p className="agent-error">{agentState.error}</p> : null}
       {status === "completed" && name === "ingestion" && result.summary ? (
         <p className="agent-detail">
@@ -369,8 +496,21 @@ function AgentCard({ name, agentState }) {
         </p>
       ) : null}
       {status === "completed" && name === "qa" && result.summary ? (
-        <p className="agent-detail">
+        <p className="agent-detail" title={SCORE_DEFINITIONS["QA quality"]}>
           Quality: {result.overall_quality_score ?? "—"}% · {result.summary.flag_count ?? 0} flags
+          <InfoTip text={SCORE_DEFINITIONS["QA quality"]} />
+        </p>
+      ) : null}
+      {status === "completed" && name === "pincode" && result.summary ? (
+        <p className="agent-detail" title={result.guardrail}>
+          {result.summary.valid_facility_pin_rows ?? 0} valid PIN rows · {result.summary.review_item_count ?? 0} review
+          <InfoTip text={result.guardrail} />
+        </p>
+      ) : null}
+      {status === "completed" && name === "nfhs" && result.summary ? (
+        <p className="agent-detail" title={result.guardrail}>
+          {result.summary.expected_nfhs_source_rows ?? 0} district rows · {result.summary.baseline_suppressed_cell_count ?? 0} suppressed cells
+          <InfoTip text={result.guardrail} />
         </p>
       ) : null}
       {status === "completed" && name === "dedup" && result.mode === "ingest" && result.summary ? (
@@ -404,8 +544,9 @@ function AgentCard({ name, agentState }) {
         </p>
       ) : null}
       {status === "completed" && name === "risk" ? (
-        <p className="agent-detail">
+        <p className="agent-detail" title={`${SCORE_DEFINITIONS["Data readiness"]} ${SCORE_DEFINITIONS["Planning readiness"]}`}>
           Data readiness: {result.data_readiness_score ?? "—"}% · Planning: {result.planning_readiness_score ?? "—"}%
+          <InfoTip text={`${SCORE_DEFINITIONS["Data readiness"]} ${SCORE_DEFINITIONS["Planning readiness"]}`} />
         </p>
       ) : null}
     </div>
@@ -427,8 +568,8 @@ function PipelinePanel({ pipeline, onStart, busy, ingestRecords }) {
           <h2>AI Pipeline</h2>
           <p>
             {ingestRecords
-              ? `Ingest mode: ${ingestRecords.length} incoming records → QA → Dedupe/Evidence/Geo → Shortage → Review → Risk.`
-              : "Analysis mode: Ingest → QA → Dedupe/Evidence/Geo → Shortage → Review → Risk."}
+              ? `Ingest mode: ${ingestRecords.length} incoming records → QA → PIN/NFHS context → Dedupe/Evidence/Geo → Shortage → Review → Risk.`
+              : "Analysis mode: Ingest → QA → PIN/NFHS context → Dedupe/Evidence/Geo → Shortage → Review → Risk."}
             {pipeline?.pipeline_id ? <span className="run-id"> Run: {pipeline.pipeline_id}</span> : null}
             {pipeline?.mode ? <span className="run-id"> [{pipeline.mode}]</span> : null}
           </p>
@@ -509,7 +650,7 @@ function ImportPipeline({ scratchpad, setScratchpad, onSaveScratchpad, onReparse
         {uploadPreview ? (
           <div className="import-summary">
             <Metric label="Parsed rows" value={uploadPreview.row_count.toLocaleString()} />
-            <Metric label="Import readiness" value={`${uploadPreview.import_readiness}%`} />
+            <Metric label="Import readiness" value={`${uploadPreview.import_readiness}%`} tooltip={SCORE_DEFINITIONS["Import readiness"]} />
             <Metric label="Columns" value={uploadPreview.columns.length.toLocaleString()} />
           </div>
         ) : null}
@@ -629,6 +770,7 @@ function ActionsQueue({ state, onDecision, focus }) {
   const [decisionError, setDecisionError] = useState("");
   const [decisionSaved, setDecisionSaved] = useState("");
   const [decisionBusy, setDecisionBusy] = useState("");
+  const detailRef = React.useRef(null);
 
   useEffect(() => {
     if (focus) {
@@ -654,11 +796,17 @@ function ActionsQueue({ state, onDecision, focus }) {
     }
   }, [filtered, selected]);
 
-  function chooseAction(action) {
+  function chooseAction(action, scrollToDetail = false) {
     setSelected(action);
     setNote(action?.review_note || "");
     setDecisionError("");
     setDecisionSaved("");
+    if (scrollToDetail) {
+      window.requestAnimationFrame(() => {
+        detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        detailRef.current?.focus?.({ preventScroll: true });
+      });
+    }
   }
 
   async function decide(button) {
@@ -674,6 +822,7 @@ function ActionsQueue({ state, onDecision, focus }) {
     setDecisionSaved("");
     try {
       await onDecision(selected.action_id, button.status, trimmed);
+      setSelected({ ...selected, status: button.status, review_note: trimmed });
       setDecisionSaved(`${button.label} saved to the action queue.`);
     } catch (error) {
       setDecisionError(error.message);
@@ -727,10 +876,32 @@ function ActionsQueue({ state, onDecision, focus }) {
           ))}
         </div>
         <div className="queue-summary">
-          <Metric label="Visible actions" value={filtered.length.toLocaleString()} detail="current filters" />
-          <Metric label="Needs review" value={actions.filter((a) => inferredQueue(a) === "Human review").length.toLocaleString()} detail="human queue" tone="risk" />
-          <Metric label="Agent ready" value={actions.filter((a) => inferredQueue(a) === "Agent ready").length.toLocaleString()} detail="safe-fix candidates" />
-          <Metric label="Decision required" value={actions.filter((a) => a.decision_required !== false && inferredQueue(a) !== "Closed").length.toLocaleString()} detail="open proof/reject items" tone="warn" />
+          <Metric
+            label="Visible actions"
+            value={filtered.length.toLocaleString()}
+            detail="current filters"
+            onClick={() => applyFilter({ queue: "All", status: "All" })}
+          />
+          <Metric
+            label="Needs review"
+            value={actions.filter((a) => inferredQueue(a) === "Human review").length.toLocaleString()}
+            detail="human queue"
+            tone="risk"
+            onClick={() => applyFilter({ queue: "Human review", status: "Needs review", owner: "Human" })}
+          />
+          <Metric
+            label="Agent ready"
+            value={actions.filter((a) => inferredQueue(a) === "Agent ready").length.toLocaleString()}
+            detail="safe-fix candidates"
+            onClick={() => applyFilter({ queue: "Agent ready", status: "Ready", owner: "AI agent" })}
+          />
+          <Metric
+            label="Decision required"
+            value={actions.filter((a) => a.decision_required !== false && inferredQueue(a) !== "Closed").length.toLocaleString()}
+            detail="open proof/reject items"
+            tone="warn"
+            onClick={() => applyFilter({ queue: "All", status: "All" })}
+          />
         </div>
         <DataTable
           rows={filtered}
@@ -750,12 +921,13 @@ function ActionsQueue({ state, onDecision, focus }) {
               render: (row) => (
                 <button
                   className="small-button"
+                  aria-label={`Open details for ${row.recommendation}`}
                   onClick={(event) => {
                     event.stopPropagation();
-                    chooseAction(row);
+                    chooseAction(row, true);
                   }}
                 >
-                  Work item
+                  Open details
                 </button>
               )
             }
@@ -763,7 +935,7 @@ function ActionsQueue({ state, onDecision, focus }) {
         />
       </div>
 
-      <div className="panel full detail-panel">
+      <div className="panel full detail-panel" ref={detailRef} tabIndex="-1">
         <div>
           <h2>Selected Action</h2>
           {selected ? (
@@ -990,12 +1162,22 @@ function App() {
   }
 
   async function actionDecision(actionId, status, note) {
-    await api(`/api/actions/${actionId}/decision`, {
+    const result = await api(`/api/actions/${actionId}/decision`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status, note })
     });
-    await refresh();
+    setState((current) => ({
+      ...current,
+      run: {
+        ...current.run,
+        actions: (current.run.actions || []).map((action) =>
+          action.action_id === actionId
+            ? { ...action, status, review_note: note || "", persisted: result.persisted, cache_updated: result.cache_updated }
+            : action
+        ),
+      },
+    }));
   }
 
   function jumpToActions(focus) {

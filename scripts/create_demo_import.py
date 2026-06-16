@@ -257,7 +257,7 @@ def write_workbook(rows: list[dict]) -> None:
         {
             "demo_step": 2,
             "what_to_show": "Run ingestion pipeline.",
-            "expected_result": "All eight agents complete in local skeleton mode.",
+            "expected_result": "All ten agents complete in local skeleton mode, including PIN and NFHS context checks.",
         },
         {
             "demo_step": 3,

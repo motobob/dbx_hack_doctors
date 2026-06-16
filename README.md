@@ -21,6 +21,8 @@ The demo folder has the presenter-ready assets:
 - `demo/DEMO_NARRATIVE.md`: judging story and product framing.
 - `demo/DEMO_SCRIPT.md`: timed three-minute click-through.
 - `demo/DEMO_CHECKLIST.md`: pre-demo validation checklist.
+- `demo/SCORE_GUIDE.md`: plain-English definitions for every percentage score.
+- `demo/DEVPOST_STORY.md`: Devpost-ready submission story.
 - `demo/data_readiness_demo_import.xlsx`: 12-row XLSX import designed to trigger duplicate, sparse-field, weak-claim, and review-gate signals.
 
 This repo is configured for local exploration of this Databricks workspace:
@@ -137,6 +139,14 @@ Open:
 http://127.0.0.1:8000
 ```
 
+Or run the full local dev pair from the repo root:
+
+```bash
+./run.sh dev
+```
+
+`run.sh dev` automatically chooses the next free API/UI ports if `8000` or `5173` are already occupied. You can force ports with `API_PORT=8001 UI_PORT=5174 ./run.sh dev`.
+
 The Databricks App command is defined in `app/app.yaml`.
 
 ### Solution Architecture
@@ -150,14 +160,48 @@ flowchart LR
   api --> source[(Source facilities table)]
   api --> result[(App result tables)]
   api --> pipe[Agent pipeline]
+  pipe --> pin[PincodeIngestionAgent]
+  pipe --> nfhs[NfhsSurveyIngestionAgent]
   pipe --> dedup[DedupAgent]
-  pipe --> geo[GeoAgent]
+  pin --> geo[GeoAgent]
+  nfhs --> shortage[ShortageAgent]
   pipe --> shortage[ShortageAgent]
   dedup --> risk[RiskAgent]
   geo --> risk
+  nfhs --> risk
   shortage --> risk
   risk --> result
   result --> ui
+```
+
+### White-Label Dataset Packs
+
+The app should stay reusable beyond the DAIS India healthcare dataset. The long-term product shape is a white-label readiness cockpit where each dataset family ships as a **dataset pack**: source table config, canonical schema mapping, agent specs, quality rules, score definitions, and demo copy.
+
+For example, a future Zimbabwe healthcare dataset should not require rewriting the app. It should add a Zimbabwe facility dataset pack with country-specific geography rules, facility fields, evidence vocabulary, and risk-planning labels, while reusing the same Current State, Import + Pipeline, Actions, and Risk Recommendations workflow.
+
+```mermaid
+flowchart TB
+  app[White-label Data Readiness Desk] --> core[Core app shell]
+  core --> ui[Reusable four-tab UX]
+  core --> api[FastAPI state/action APIs]
+  core --> pipe[Agent pipeline runtime]
+
+  pack[Dataset pack] --> schema[Canonical schema map]
+  pack --> rules[Quality and evidence rules]
+  pack --> agents[Agent prompts/specs]
+  pack --> copy[Labels, score guide, demo narrative]
+  pack --> uc[Unity Catalog source/result config]
+
+  schema --> pipe
+  rules --> pipe
+  agents --> pipe
+  uc --> api
+  copy --> ui
+
+  india[India DAIS pack] --> pack
+  zimbabwe[Future Zimbabwe pack] --> pack
+  other[Other health datasets] --> pack
 ```
 
 ```mermaid
@@ -181,12 +225,16 @@ The app includes an ingestion-led skeleton agent workflow. Agent specs, state sh
 ```mermaid
 flowchart LR
   ingest[Ingestion Manager] --> qa[QA/Profile Agent]
+  qa --> pin[PIN Directory Agent]
+  qa --> nfhs[NFHS Survey Agent]
   qa --> dedupe[Dedupe Agent]
   qa --> evidence[Evidence and Specialty Agent]
   qa --> geo[Geo Agent]
+  pin --> geo
   dedupe --> review[Human review gate]
   evidence --> trust[Trust scoring]
   geo --> trust
+  nfhs --> trust
   trust --> risk[Risk Planning Agent]
   review --> risk
 ```
@@ -198,6 +246,14 @@ Current status:
 - Databricks multi-task Job: scaffolded by `scripts/setup_dbx_job.py`.
 - Databricks Job deployment: not considered verified until `DATABRICKS_PIPELINE_JOB_ID` exists, deployed `PIPELINE_MODE=databricks`, and all agent tasks complete end to end.
 - Design-session note: `docs/design-session-2026-06-15-agent-architecture.md`.
+- Agent workflow rulebook:
+  - `agents/ingestion_agent.md`: orchestrator and sub-agent operating prompts.
+  - `docs/facilities_data_quality.md`: field cleaning, dedupe, geocoding, and scoring rules.
+  - `agents/pincode_ingestion_agent.md`: PIN directory enrichment workflow and sub-agent prompts.
+  - `docs/pincode_data_quality.md`: PIN lookup confidence, ambiguity, and join-safe enrichment rules.
+  - `agents/nfhs_survey_ingestion_agent.md`: NFHS-5 district survey ingestion workflow and sub-agent prompts.
+  - `docs/nfhs_survey_ingestion_data_quality.md`: NFHS suppression, caution-estimate, geography-key, and ingestion-quality rules.
+  - `app/lib/agents/SPEC.md`: integrated contracts used by the current app agents.
 
 ### Data Backend
 

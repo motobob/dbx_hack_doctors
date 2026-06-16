@@ -6,7 +6,7 @@ click-through demo skeleton:
 
 1. FastAPI health/state endpoints respond in local checked-in-data mode.
 2. Demo XLSX parses through the same upload-preview endpoint used by the UI.
-3. The import records run through the full eight-agent local pipeline.
+3. The import records run through the full ten-agent local pipeline.
 4. Expected demo signals are present: duplicate decisions, row-quality flags,
    and human-review items.
 """
@@ -24,7 +24,7 @@ from fastapi import UploadFile
 REPO_DIR = Path(__file__).resolve().parents[1]
 APP_DIR = REPO_DIR / "app"
 DEMO_XLSX = REPO_DIR / "demo" / "data_readiness_demo_import.xlsx"
-EXPECTED_AGENTS = ["ingestion", "qa", "dedup", "evidence", "geo", "shortage", "review", "risk"]
+EXPECTED_AGENTS = ["ingestion", "qa", "pincode", "nfhs", "dedup", "evidence", "geo", "shortage", "review", "risk"]
 
 
 def configure_local_env() -> None:
@@ -91,12 +91,22 @@ async def main_async() -> int:
     assert_true(all(status == "completed" for status in agent_statuses.values()), f"agent statuses: {agent_statuses}")
 
     ingestion_summary = agents["ingestion"]["result"]["summary"]
+    pincode_summary = agents["pincode"]["result"]["summary"]
+    nfhs_summary = agents["nfhs"]["result"]["summary"]
     dedup_summary = agents["dedup"]["result"]["summary"]
     review_summary = agents["review"]["result"]["summary"]
 
     assert_true(
         ingestion_summary.get("row_quality_flag_count", 0) >= 3,
         f"expected at least 3 row-quality flags, got {ingestion_summary}",
+    )
+    assert_true(
+        pincode_summary.get("join_safe_lookup_required") is True,
+        f"expected PIN agent to enforce join-safe lookup, got {pincode_summary}",
+    )
+    assert_true(
+        nfhs_summary.get("join_key_required") is True,
+        f"expected NFHS agent to enforce normalized join keys, got {nfhs_summary}",
     )
     assert_true(
         dedup_summary.get("duplicate_count", 0) >= 4,
@@ -111,6 +121,8 @@ async def main_async() -> int:
     print(f"pipeline_id={pipeline_id}")
     print(f"agents={agent_statuses}")
     print(f"ingestion={ingestion_summary}")
+    print(f"pincode={pincode_summary}")
+    print(f"nfhs={nfhs_summary}")
     print(f"dedup={dedup_summary}")
     print(f"review={review_summary}")
     return 0

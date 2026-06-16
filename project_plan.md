@@ -151,14 +151,14 @@ Anything beyond that should be treated as stretch.
 As of the latest 2026-06-15 build, the app is a Databricks App with a FastAPI backend and React/Vite frontend. The working product surface is four tabs:
 
 - **Current State**: mission-control landing view with data consistency, facility count, duplicate clusters, human review count, score components, scratchpad-derived tags, and a searchable/sortable dataset preview.
-- **Import + Pipeline**: XLS/XLSX/CSV upload preview, Markdown scratchpad View/Edit flow, re-parse trigger, and the eight-agent pipeline status panel.
+- **Import + Pipeline**: XLS/XLSX/CSV upload preview, Markdown scratchpad View/Edit flow, re-parse trigger, and the ten-agent pipeline status panel.
 - **Actions**: actionable proof/reject work queue with clickable lanes, selected-action next steps, decision notes, and status-aware controls such as approve merge, apply safe fix, reject claim, and needs more evidence.
 - **Risk Recommendations**: Track 2 planning output with evidence-attached risk rows, planning notes, and handoff buttons back into cleanup actions/evidence review.
 
 ```mermaid
 flowchart LR
   current[Current State] --> import[Import + Pipeline]
-  import --> agents[8-agent workflow]
+  import --> agents[10-agent workflow]
   agents --> actions[Action queue]
   actions --> result[Trusted resulting state]
   result --> risk[Risk Recommendations]
@@ -201,14 +201,59 @@ Current validation:
 - Full app state validation produced `backend=live`, `fallback=False`, and 100 preview rows.
 - The deployed app now prewarms state on startup and uses cache-first reads after live state is hydrated.
 
+## White-Label Dataset Pack Direction
+
+The app should be future-proofed as a reusable Data Readiness Desk, not a one-off India facilities dashboard. The core product shell should remain dataset-agnostic: four tabs, hot state cache, import preview, pipeline execution, proof/reject actions, resulting-state versioning, and risk recommendations.
+
+Dataset-specific behavior should move into **dataset packs**:
+
+- Source and target Unity Catalog configuration.
+- Canonical schema mapping.
+- Country/geography normalization rules.
+- Evidence/capability vocabulary.
+- Agent specs and prompt rulebooks.
+- Score definitions and tooltip copy.
+- Demo narrative labels.
+
+This lets the same app support the current India DAIS pack, plus a future Zimbabwe healthcare dataset pack, without rewriting the UI or backend orchestration.
+
+```mermaid
+flowchart LR
+  subgraph CORE[Reusable App Core]
+    ui[Four-tab UX]
+    api[FastAPI APIs]
+    state[Source/result state model]
+    runtime[Agent runtime]
+  end
+
+  subgraph PACK[Dataset Pack]
+    cfg[Catalog/table config]
+    schema[Schema mapping]
+    rules[Quality rules]
+    prompts[Agent specs]
+    copy[Labels and score guide]
+  end
+
+  india[India healthcare facilities] --> PACK
+  zimbabwe[Future Zimbabwe dataset] --> PACK
+  other[Future country/domain dataset] --> PACK
+
+  PACK --> runtime
+  PACK --> state
+  PACK --> ui
+  CORE --> deployed[Databricks App deployment]
+```
+
 ## Current Agent Architecture
 
-The agent workflow is implemented as an eight-agent skeleton that can run locally inside FastAPI or through a Databricks multi-task Job:
+The agent workflow is implemented as a ten-agent skeleton that can run locally inside FastAPI or through a Databricks multi-task Job:
 
 - IngestionManagerAgent
 - QAProfileAgent
 - DedupAgent
 - EvidenceSpecialtyAgent
+- PincodeIngestionAgent
+- NfhsSurveyIngestionAgent
 - GeoAgent
 - ShortageAgent
 - HumanReviewGateAgent
@@ -217,15 +262,29 @@ The agent workflow is implemented as an eight-agent skeleton that can run locall
 ```mermaid
 flowchart LR
   ingest[Ingestion Manager] --> qa[QA Profile]
+  qa --> pincode[PIN Directory]
+  qa --> nfhs[NFHS Survey]
+  pincode --> geo[Geo]
   qa --> dedup[Dedup]
   qa --> evidence[Evidence/Specialty]
-  qa --> geo[Geo]
+  qa --> geo
   dedup --> shortage[Shortage]
   evidence --> shortage
   geo --> shortage
+  nfhs --> shortage
   shortage --> review[Human Review Gate]
   review --> risk[Risk Synthesis]
   risk --> ui[Actions and Risk tabs]
 ```
 
-Local mode is validated with `scripts/smoke_local_e2e.py`. Databricks Job mode is scaffolded and the job exists as `590750946177761`, but the multi-task job path still needs end-to-end validation.
+Local mode is validated with `scripts/smoke_local_e2e.py`, including the runtime `PincodeIngestionAgent` and `NfhsSurveyIngestionAgent`. Databricks Job mode is scaffolded and the job exists as `590750946177761`, but the multi-task job path still needs end-to-end validation after resetting the job to include all ten tasks.
+
+The agent workflow rulebook is now integrated from the merged fork:
+
+- `agents/ingestion_agent.md` defines the ingestion orchestrator plus alignment/cleaning, dedupe, review surface, and scoring sub-agents.
+- `docs/facilities_data_quality.md` defines the concrete data-quality rules: corruption detection, field typing, canonical state mapping, dedupe classes, geocoding strategy, and scoring baseline.
+- `agents/pincode_ingestion_agent.md` defines the PIN directory orchestrator for cleaning post-office rows, parsing/correcting coordinates, aggregating to one row per PIN, surfacing ambiguity, and scoring lookup confidence.
+- `docs/pincode_data_quality.md` defines the PIN guardrails: never fan out facility rows on raw post-office grain, never silently choose district for ambiguous PINs, and always expose confidence/ambiguity.
+- `agents/nfhs_survey_ingestion_agent.md` defines the NFHS-5 district survey orchestrator for schema checks, geography normalization, indicator parsing, caveat flags, and ingestion scoring.
+- `docs/nfhs_survey_ingestion_data_quality.md` defines the NFHS guardrails: suppressed `*` values become null plus flags, parenthesized estimates stay caution-flagged, district joins require normalized keys, and ingestion quality is not health risk.
+- `app/lib/agents/SPEC.md` maps those rules into the current ten-agent app workflow and is the implementation contract for future agents.

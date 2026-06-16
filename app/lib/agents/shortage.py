@@ -52,6 +52,13 @@ Return ONLY valid JSON in this exact shape:
 
 class ShortageAgent(BaseAgent):
     name = "shortage"
+    workflow_ref = "app/lib/agents/SPEC.md#shortageagent-operating-contract"
+    rule_families = [
+        "trust-weighted coverage",
+        "capability gaps",
+        "data-poor regions",
+        "planning impact",
+    ]
 
     def _execute(self, df: pd.DataFrame, upstream: dict[str, Any]) -> dict:
         state_col = "address_stateOrRegion"

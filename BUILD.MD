@@ -127,10 +127,10 @@ The workbook intentionally includes:
 Latest local validation with `AGENT_LLM_ENABLED=false`:
 
 - 12 incoming rows parsed from the XLSX.
-- All eight agents completed.
+- All ten agents completed, including PIN directory and NFHS survey context checks.
 - Ingestion reported 3 row-quality flags.
 - Dedup reported 4 exact duplicate decisions.
-- HumanReviewGate reported 30 review items and crossed the material planning impact threshold.
+- HumanReviewGate reported 50 review items after adding PIN/NFHS guardrails and crossed the material planning impact threshold.
 
 ## UX and UI Mockups
 
@@ -251,8 +251,8 @@ Key interactions:
 
 - User uploads XLS/XLSX/CSV and previews parsed rows.
 - Scratchpad notes/tags can be saved and used to trigger re-parse.
-- User runs the eight-agent pipeline.
-- Agent cards show ingestion, QA, dedupe, evidence, geo, shortage, review gate, and risk status.
+- User runs the ten-agent pipeline.
+- Agent cards show ingestion, QA, PIN directory, NFHS survey, dedupe, evidence, geo, shortage, review gate, and risk status.
 
 ### Tab 3: Actions Mockup
 
@@ -719,6 +719,48 @@ flowchart LR
   sp --> audit
 ```
 
+### White-Label Dataset Pack Architecture
+
+The app should become a reusable Data Readiness Desk shell. Dataset-specific logic belongs in dataset packs, not scattered through the React app or FastAPI routes.
+
+```mermaid
+flowchart TB
+  subgraph CORE[Core Product]
+    tabs[Current State / Import + Pipeline / Actions / Risk]
+    api[FastAPI state + action APIs]
+    cache[Hot cache and diagnostics]
+    runner[Agent pipeline runner]
+    ucmodel[Source / work / result / audit model]
+  end
+
+  subgraph PACK[Dataset Pack]
+    sourceCfg[Source table config]
+    mapping[Canonical schema mapping]
+    rules[Quality and evidence rules]
+    specs[Agent specs and prompts]
+    scores[Score guide and labels]
+  end
+
+  india[India DAIS facilities pack] --> PACK
+  zimbabwe[Future Zimbabwe facilities pack] --> PACK
+  future[Future health dataset pack] --> PACK
+
+  PACK --> runner
+  PACK --> ucmodel
+  PACK --> tabs
+  CORE --> dbx[Databricks App]
+```
+
+Dataset pack contract:
+
+- `dataset_id`, display name, country/region, and planning domain.
+- Unity Catalog source tables and result catalog/schema targets.
+- Canonical field map into the app's normalized facility/result state.
+- Quality rulebook docs and score definitions.
+- Agent list, workflow refs, and rule-family labels.
+- Optional country-specific reference tables such as PIN/postcode directories, district surveys, or administrative boundaries.
+- Demo narrative/copy overrides so the app can be white-labeled without changing core code.
+
 ### Source State vs Resulting State
 
 The app has two different data states and they must not be mixed:
@@ -967,6 +1009,8 @@ In ingest mode, the agent returns per-record decisions:
 
 - **IngestionManagerAgent**: upload/schema routing, required-field checks, column-shift suspicion, and ingest route.
 - **QAProfileAgent**: completeness, sparsity, suspicious metadata, and record-level QA flags.
+- **PincodeIngestionAgent**: validates the PIN directory workflow contract, enforces join-safe lookup posture, and surfaces PIN enrichment review items.
+- **NfhsSurveyIngestionAgent**: validates the NFHS-5 district survey workflow contract, enforces normalized district join keys, and preserves suppressed/caution caveats.
 - **DedupAgent**: cluster merge/split/review decisions (analysis mode) or insert/update/duplicate/review per incoming record (ingest mode).
 - **EvidenceSpecialtyAgent**: specialty/capability evidence extraction skeleton and claim review flags.
 - **GeoAgent**: flagged records, coverage gaps, geographic summary
@@ -976,10 +1020,36 @@ In ingest mode, the agent returns per-record decisions:
 
 Detailed agent contracts and pipeline state are maintained in `app/lib/agents/SPEC.md`.
 
+The merged fork docs are now integrated as the agent workflow rulebook:
+
+- `agents/ingestion_agent.md`: ingestion orchestrator, alignment/cleaning, dedupe, review surface, and scoring agent prompts.
+- `docs/facilities_data_quality.md`: concrete field-level quality rules, dedupe classes, canonical state mapping, geocoding strategy, and scoring baseline.
+- `agents/pincode_ingestion_agent.md`: PIN directory enrichment orchestrator for post-office cleaning, coordinate parsing, PIN aggregation, ambiguity flags, and scoring.
+- `docs/pincode_data_quality.md`: concrete PIN directory rules, including the key guardrail that a PIN code is not a district key.
+- `agents/nfhs_survey_ingestion_agent.md`: NFHS-5 district survey ingestion orchestrator for schema checks, geography normalization, indicator parsing, caveat flags, and ingestion scoring.
+- `docs/nfhs_survey_ingestion_data_quality.md`: concrete NFHS rules, including the guardrails that suppressed `*` values are null, caution estimates stay flagged, and ingestion quality is not district health risk.
+- `app/lib/agents/SPEC.md`: current implementation contract that maps those rules into the ten app agents.
+
+Runtime agent payloads now include `workflow_ref` and `rule_families`, and the React pipeline cards display those rule families so the demo shows real workflow substance, not generic agent boxes.
+
+PIN enrichment posture:
+
+- The raw India Post PIN directory is post-office grain.
+- Facilities must join only to `pincode_lookup_clean`, the one-row-per-PIN aggregate.
+- Multi-state and weak multi-district PINs must create ambiguity flags and review items.
+- PIN-derived coordinates are approximate postal centroids, not exact facility geocodes.
+
+NFHS survey posture:
+
+- NFHS is district-level survey context, not facility evidence.
+- Suppressed `*` values become null plus caveat flags; they are never zeros.
+- Parenthesized estimates remain available with visible caution flags.
+- NFHS context joins require normalized state/district keys and cannot validate individual facility claims.
+
 Current deploy status:
 
 - Local agent mode is implemented.
-- Local eight-agent skeleton was revalidated on 2026-06-15: Python compile passed, frontend build passed, and a local pipeline run completed `ingestion`, `qa`, `dedup`, `evidence`, `geo`, `shortage`, `review`, and `risk`.
+- Local ten-agent skeleton was revalidated on 2026-06-15: Python compile passed, frontend build passed, and a local pipeline run completed `ingestion`, `qa`, `pincode`, `nfhs`, `dedup`, `evidence`, `geo`, `shortage`, `review`, and `risk`.
 - Local API-style end-to-end smoke test is implemented at `scripts/smoke_local_e2e.py` and passes against the demo XLSX import path.
 - Databricks Job mode is scaffolded with `scripts/setup_dbx_job.py`.
 - Databricks multi-task Job exists as `590750946177761`, but Job mode is **not verified deployed** until an end-to-end run completes.

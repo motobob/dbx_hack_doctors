@@ -21,7 +21,7 @@ from typing import Any
 APP_DIR = Path(__file__).resolve().parents[1]
 STATE_DIR = APP_DIR / "state"
 
-AGENT_NAMES = ["ingestion", "qa", "dedup", "evidence", "geo", "shortage", "review", "risk"]
+AGENT_NAMES = ["ingestion", "qa", "pincode", "nfhs", "dedup", "evidence", "geo", "shortage", "review", "risk"]
 
 # ── state shape ──────────────────────────────────────────────────────────────
 

@@ -94,6 +94,14 @@ Return ONLY valid JSON in this exact shape (no prose, no markdown fences):
 
 class DedupAgent(BaseAgent):
     name = "dedup"
+    workflow_ref = "docs/facilities_data_quality.md#3-deduplication-rules"
+    rule_families = [
+        "exact duplicate",
+        "same name/location",
+        "enriched update",
+        "data removal review",
+        "location moved",
+    ]
 
     def _execute(self, df: pd.DataFrame, upstream: dict[str, Any]) -> dict:
         # Ingestion mode: compare incoming records against existing dataset

@@ -74,6 +74,10 @@ Say:
 
 > The workflow is ingestion-led. It profiles row quality, detects duplicates, extracts capability evidence, checks geography, estimates shortage signals, and then opens a review gate for the decisions that materially affect planning.
 
+Optional geography line:
+
+> For PIN codes, we are careful: a PIN code is not a district key. The app uses a one-row-per-PIN lookup with confidence and ambiguity flags so facility rows do not fan out or get assigned to the wrong district silently.
+
 Call out expected stages:
 
 - Ingest

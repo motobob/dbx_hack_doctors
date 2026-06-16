@@ -7,6 +7,8 @@ This folder contains the click-through assets for the three-minute Databricks Ap
 - `DEMO_NARRATIVE.md`: the judging story and product framing.
 - `DEMO_SCRIPT.md`: the timed presenter script and click path.
 - `DEMO_CHECKLIST.md`: quick pre-demo validation checklist.
+- `SCORE_GUIDE.md`: plain-English definitions for every percentage score.
+- `DEVPOST_STORY.md`: submission story in the standard Devpost prompt format.
 - `data_readiness_demo_import.xlsx`: a 12-row import workbook designed to trigger the pipeline.
 
 ## Demo Promise

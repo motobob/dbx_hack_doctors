@@ -133,6 +133,22 @@ def _set_cached_state(state: dict[str, Any], error: str = "") -> None:
         STATE_CACHE["last_error"] = error
 
 
+def _update_cached_action_decision(action_id: str, status: str, note: str | None = None) -> bool:
+    updated = False
+    with STATE_CACHE_LOCK:
+        state = STATE_CACHE.get("state")
+        if not isinstance(state, dict):
+            return False
+        actions = state.get("run", {}).get("actions", [])
+        for action in actions:
+            if action.get("action_id") == action_id:
+                action["status"] = status
+                action["review_note"] = note or ""
+                updated = True
+                break
+    return updated
+
+
 def _mark_refreshing(refreshing: bool) -> None:
     with STATE_CACHE_LOCK:
         STATE_CACHE["refreshing"] = refreshing
@@ -447,9 +463,17 @@ def pipeline_status(pipeline_id: str) -> dict[str, Any]:
 
 @app.post("/api/actions/{action_id}/decision")
 def action_decision(action_id: str, payload: ActionDecisionPayload) -> dict[str, Any]:
-    if not save_action_decision(action_id=action_id, status=payload.status, note=payload.note):
+    cache_updated = _update_cached_action_decision(action_id, payload.status, payload.note)
+    persisted = save_action_decision(action_id=action_id, status=payload.status, note=payload.note)
+    if not (cache_updated or persisted):
         raise HTTPException(status_code=404, detail="Action not found.")
-    return {"action_id": action_id, "status": payload.status, "updated": True}
+    return {
+        "action_id": action_id,
+        "status": payload.status,
+        "updated": True,
+        "persisted": persisted,
+        "cache_updated": cache_updated,
+    }
 
 
 if FRONTEND_DIST.exists():

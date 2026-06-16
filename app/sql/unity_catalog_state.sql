@@ -153,6 +153,152 @@ CREATE TABLE IF NOT EXISTS dais_readiness_desk.work.data_quality_findings (
 USING DELTA
 COMMENT 'Data readiness findings produced by profiling and evidence extraction';
 
+CREATE TABLE IF NOT EXISTS dais_readiness_desk.work.pincode_post_offices_clean (
+  run_id STRING NOT NULL,
+  pincode_str STRING,
+  circle_raw STRING,
+  region_raw STRING,
+  division_raw STRING,
+  office_name_raw STRING,
+  office_type_raw STRING,
+  delivery_raw STRING,
+  district_raw STRING,
+  state_raw STRING,
+  state_norm STRING,
+  district_norm STRING,
+  district_display STRING,
+  latitude_raw STRING,
+  longitude_raw STRING,
+  latitude_corrected DOUBLE,
+  longitude_corrected DOUBLE,
+  coord_status STRING,
+  quality_flags_json STRING,
+  cleaned_at TIMESTAMP
+)
+USING DELTA
+COMMENT 'Cleaned India Post PIN directory at post-office grain; never join facilities directly to this table';
+
+CREATE TABLE IF NOT EXISTS dais_readiness_desk.work.pincode_lookup_clean (
+  run_id STRING NOT NULL,
+  pincode_str STRING NOT NULL,
+  post_office_count BIGINT,
+  office_type_set_json STRING,
+  delivery_status_set_json STRING,
+  state_count BIGINT,
+  district_count BIGINT,
+  region_count BIGINT,
+  division_count BIGINT,
+  circle_count BIGINT,
+  canonical_state STRING,
+  primary_district STRING,
+  primary_district_share DOUBLE,
+  latitude_centroid DOUBLE,
+  longitude_centroid DOUBLE,
+  valid_coord_count BIGINT,
+  missing_coord_count BIGINT,
+  invalid_coord_count BIGINT,
+  coord_swapped_count BIGINT,
+  coord_lat_equals_lon_count BIGINT,
+  max_coord_span_km_rough DOUBLE,
+  has_multi_state BOOLEAN,
+  has_multi_district BOOLEAN,
+  has_missing_state BOOLEAN,
+  has_missing_district BOOLEAN,
+  has_coord_quality_issue BOOLEAN,
+  pin_confidence_tier STRING,
+  pin_quality_score DOUBLE,
+  aggregation_flags_json STRING,
+  created_at TIMESTAMP
+)
+USING DELTA
+COMMENT 'One-row-per-PIN lookup table safe for facility enrichment without row fan-out';
+
+CREATE TABLE IF NOT EXISTS dais_readiness_desk.work.pincode_ambiguity_flags (
+  run_id STRING NOT NULL,
+  pincode_str STRING NOT NULL,
+  flag_type STRING,
+  severity STRING,
+  state_count BIGINT,
+  district_count BIGINT,
+  evidence_json STRING,
+  recommended_action STRING,
+  created_at TIMESTAMP
+)
+USING DELTA
+COMMENT 'Ambiguous or unsafe PIN geography findings for review and downstream caveats';
+
+CREATE TABLE IF NOT EXISTS dais_readiness_desk.work.pincode_review_queue (
+  run_id STRING NOT NULL,
+  review_id STRING NOT NULL,
+  pincode_str STRING,
+  issue_type STRING,
+  priority STRING,
+  recommendation STRING,
+  evidence_json STRING,
+  status STRING,
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
+)
+USING DELTA
+COMMENT 'Human review queue for multi-state, weak district, missing geo, or unsafe PIN-derived assignments';
+
+CREATE TABLE IF NOT EXISTS dais_readiness_desk.work.nfhs_district_indicators_clean (
+  run_id STRING NOT NULL,
+  state_ut_raw STRING,
+  district_name_raw STRING,
+  state_ut_norm STRING,
+  district_name_norm STRING,
+  district_join_key STRING,
+  survey_period STRING,
+  source_name STRING,
+  source_table STRING,
+  households_surveyed DOUBLE,
+  women_15_49_interviewed DOUBLE,
+  men_15_54_interviewed DOUBLE,
+  suppressed_cell_count BIGINT,
+  caution_cell_count BIGINT,
+  parse_failed_cell_count BIGINT,
+  row_quality_tier STRING,
+  cleaned_at TIMESTAMP,
+  indicators_json STRING
+)
+USING DELTA
+COMMENT 'Cleaned NFHS-5 district survey indicators with normalized geography keys and caveat counts';
+
+CREATE TABLE IF NOT EXISTS dais_readiness_desk.work.nfhs_indicator_quality_flags (
+  run_id STRING NOT NULL,
+  flag_id STRING NOT NULL,
+  state_ut_norm STRING,
+  district_name_norm STRING,
+  district_join_key STRING,
+  indicator_name STRING,
+  raw_value STRING,
+  parsed_value DOUBLE,
+  flag_type STRING,
+  severity STRING,
+  explanation STRING,
+  source_period STRING,
+  created_at TIMESTAMP
+)
+USING DELTA
+COMMENT 'Long-form NFHS survey ingestion caveats: suppressed, caution, parse, range, and geography warnings';
+
+CREATE TABLE IF NOT EXISTS dais_readiness_desk.work.nfhs_geography_review_queue (
+  run_id STRING NOT NULL,
+  review_id STRING NOT NULL,
+  state_ut_raw STRING,
+  district_name_raw STRING,
+  issue_type STRING,
+  priority STRING,
+  recommendation STRING,
+  evidence_json STRING,
+  status STRING,
+  created_at TIMESTAMP,
+  updated_at TIMESTAMP
+)
+USING DELTA
+COMMENT 'Human review queue for NFHS geography/key issues only';
+
 CREATE TABLE IF NOT EXISTS dais_readiness_desk.result.scratchpad_versions (
   scratchpad_version_id STRING NOT NULL,
   parent_scratchpad_version_id STRING,
@@ -300,6 +446,59 @@ CREATE TABLE IF NOT EXISTS dais_readiness_desk.audit.import_events (
 )
 USING DELTA
 COMMENT 'Append-only import workflow events';
+
+CREATE TABLE IF NOT EXISTS dais_readiness_desk.audit.pincode_ingestion_log (
+  event_id STRING NOT NULL,
+  run_id STRING,
+  raw_pincode_table STRING,
+  raw_row_count BIGINT,
+  exact_duplicate_rows BIGINT,
+  invalid_pincode_rows BIGINT,
+  coord_missing_rows BIGINT,
+  coord_parse_failed_rows BIGINT,
+  coord_swapped_rows BIGINT,
+  coord_outside_india_rows BIGINT,
+  coord_lat_equals_lon_rows BIGINT,
+  unique_pincode_count BIGINT,
+  multi_state_pincode_count BIGINT,
+  multi_district_pincode_count BIGINT,
+  tier_a_count BIGINT,
+  tier_b_count BIGINT,
+  tier_c_count BIGINT,
+  tier_d_count BIGINT,
+  queued_for_review BIGINT,
+  avg_post_office_quality_score DOUBLE,
+  avg_pincode_quality_score DOUBLE,
+  event_json STRING,
+  created_at TIMESTAMP
+)
+USING DELTA
+COMMENT 'Append-only run summaries for the PIN directory ingestion/enrichment workflow';
+
+CREATE TABLE IF NOT EXISTS dais_readiness_desk.audit.nfhs_ingestion_log (
+  event_id STRING NOT NULL,
+  run_id STRING,
+  raw_nfhs_table STRING,
+  raw_row_count BIGINT,
+  column_count BIGINT,
+  distinct_state_ut_count BIGINT,
+  distinct_district_key_count BIGINT,
+  duplicate_district_key_count BIGINT,
+  suppressed_cell_count BIGINT,
+  caution_estimate_cell_count BIGINT,
+  parse_failed_cell_count BIGINT,
+  pct_out_of_range_count BIGINT,
+  geography_review_count BIGINT,
+  tier_a_count BIGINT,
+  tier_b_count BIGINT,
+  tier_c_count BIGINT,
+  tier_d_count BIGINT,
+  avg_ingestion_quality_score DOUBLE,
+  event_json STRING,
+  created_at TIMESTAMP
+)
+USING DELTA
+COMMENT 'Append-only run summaries for the NFHS-5 survey ingestion workflow';
 
 CREATE TABLE IF NOT EXISTS dais_readiness_desk.audit.decision_events (
   event_id STRING NOT NULL,

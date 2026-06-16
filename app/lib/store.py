@@ -384,76 +384,79 @@ def save_last_run(payload: dict[str, Any]) -> None:
 
 def save_action_decision(action_id: str, status: str, note: str | None = None) -> bool:
     if use_unity_catalog_state():
-        state_table = target_table_name("result", "result_state_versions")
-        actions_table = target_table_name("result", "action_recommendations")
-        decisions_table = target_table_name("result", "action_decisions")
-        event_table = target_table_name("audit", "decision_events")
-        states = read_sql(
-            f"""
-            SELECT state_version_id
-            FROM {state_table}
-            ORDER BY created_at DESC
-            LIMIT 1
-            """
-        )
-        if states.empty:
-            return False
-
-        state_version_id = str(states.iloc[0]["state_version_id"])
-        existing = read_sql(
-            f"""
-            SELECT action_id
-            FROM {actions_table}
-            WHERE state_version_id = {sql_literal(state_version_id)}
-              AND action_id = {sql_literal(action_id)}
-            LIMIT 1
-            """
-        )
-        if existing.empty:
-            return False
-
-        now = now_iso()
-        actor = os.getenv("DATABRICKS_USER", os.getenv("USER", "app"))
-        decision_id = f"decision-{state_version_id}-{action_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
-        event_id = f"event-{decision_id}"
-        execute_many(
-            [
+        try:
+            state_table = target_table_name("result", "result_state_versions")
+            actions_table = target_table_name("result", "action_recommendations")
+            decisions_table = target_table_name("result", "action_decisions")
+            event_table = target_table_name("audit", "decision_events")
+            states = read_sql(
                 f"""
-                UPDATE {actions_table}
-                SET status = {sql_literal(status)},
-                    updated_at = CAST({sql_literal(now)} AS TIMESTAMP)
+                SELECT state_version_id
+                FROM {state_table}
+                ORDER BY created_at DESC
+                LIMIT 1
+                """
+            )
+            if states.empty:
+                return False
+
+            state_version_id = str(states.iloc[0]["state_version_id"])
+            existing = read_sql(
+                f"""
+                SELECT action_id
+                FROM {actions_table}
                 WHERE state_version_id = {sql_literal(state_version_id)}
                   AND action_id = {sql_literal(action_id)}
-                """,
-                f"""
-                INSERT INTO {decisions_table}
-                (decision_id, state_version_id, action_id, decision, decision_note, decided_at, decided_by)
-                VALUES (
-                  {sql_literal(decision_id)},
-                  {sql_literal(state_version_id)},
-                  {sql_literal(action_id)},
-                  {sql_literal(status)},
-                  {sql_literal(note or "")},
-                  CAST({sql_literal(now)} AS TIMESTAMP),
-                  {sql_literal(actor)}
-                )
-                """,
-                f"""
-                INSERT INTO {event_table}
-                (event_id, decision_id, state_version_id, action_id, event_type, event_json, created_at)
-                VALUES (
-                  {sql_literal(event_id)},
-                  {sql_literal(decision_id)},
-                  {sql_literal(state_version_id)},
-                  {sql_literal(action_id)},
-                  'action_decision_saved',
-                  {json_literal({"decision": status, "note": note or "", "actor": actor})},
-                  CAST({sql_literal(now)} AS TIMESTAMP)
-                )
-                """,
-            ]
-        )
-        return True
+                LIMIT 1
+                """
+            )
+            if existing.empty:
+                return False
+
+            now = now_iso()
+            actor = os.getenv("DATABRICKS_USER", os.getenv("USER", "app"))
+            decision_id = f"decision-{state_version_id}-{action_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S%f')}"
+            event_id = f"event-{decision_id}"
+            execute_many(
+                [
+                    f"""
+                    UPDATE {actions_table}
+                    SET status = {sql_literal(status)},
+                        updated_at = CAST({sql_literal(now)} AS TIMESTAMP)
+                    WHERE state_version_id = {sql_literal(state_version_id)}
+                      AND action_id = {sql_literal(action_id)}
+                    """,
+                    f"""
+                    INSERT INTO {decisions_table}
+                    (decision_id, state_version_id, action_id, decision, decision_note, decided_at, decided_by)
+                    VALUES (
+                      {sql_literal(decision_id)},
+                      {sql_literal(state_version_id)},
+                      {sql_literal(action_id)},
+                      {sql_literal(status)},
+                      {sql_literal(note or "")},
+                      CAST({sql_literal(now)} AS TIMESTAMP),
+                      {sql_literal(actor)}
+                    )
+                    """,
+                    f"""
+                    INSERT INTO {event_table}
+                    (event_id, decision_id, state_version_id, action_id, event_type, event_json, created_at)
+                    VALUES (
+                      {sql_literal(event_id)},
+                      {sql_literal(decision_id)},
+                      {sql_literal(state_version_id)},
+                      {sql_literal(action_id)},
+                      'action_decision_saved',
+                      {json_literal({"decision": status, "note": note or "", "actor": actor})},
+                      CAST({sql_literal(now)} AS TIMESTAMP)
+                    )
+                    """,
+                ]
+            )
+            return True
+        except Exception:
+            return False
 
     run = load_last_run()
     actions = run.get("actions", [])

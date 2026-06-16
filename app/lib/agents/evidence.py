@@ -21,6 +21,13 @@ CAPABILITY_TERMS = {
 
 class EvidenceSpecialtyAgent(BaseAgent):
     name = "evidence"
+    workflow_ref = "app/lib/agents/SPEC.md#evidencespecialtyagent-operating-contract"
+    rule_families = [
+        "claim extraction",
+        "specialty normalization",
+        "contradictions",
+        "evidence strength",
+    ]
 
     def _execute(self, df: pd.DataFrame, upstream: dict[str, Any]) -> dict:
         rows: list[dict[str, Any]] = []

@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Validate the deployed Databricks App and eight-agent Databricks Job."""
+"""Validate the deployed Databricks App and ten-agent Databricks Job."""
 from __future__ import annotations
 
 import json
@@ -14,7 +14,7 @@ from databricks.sdk import WorkspaceClient
 
 REPO_DIR = Path(__file__).resolve().parents[1]
 APP_DIR = REPO_DIR / "app"
-EXPECTED_AGENTS = ["ingestion", "qa", "dedup", "evidence", "geo", "shortage", "review", "risk"]
+EXPECTED_AGENTS = ["ingestion", "qa", "pincode", "nfhs", "dedup", "evidence", "geo", "shortage", "review", "risk"]
 
 
 def load_env() -> None:
